@@ -12,6 +12,15 @@ surface may still change.
 
 ### Added
 
+- **Boot a subset of chains** — `wharfnet up` and `wharfnet compose` now accept
+  chain **selectors**: a kind (`evm`) or a name (`anvil-1`), repeatable, so
+  `wharfnet up evm solana` boots only those chains and pulls only their images.
+  `-x`/`--exclude` skips chains (`up -x bitcoin,litecoin`), and `$WHARFNET_CHAINS`
+  provides a default selection for CI. Passing no selector still boots the whole
+  topology, so the default is unchanged. Selectors reuse the same kind-or-name
+  model as `faucet`/`logs`/chain control; unknown terms, or a selection that
+  excludes every chain, are rejected with the list of available chains.
+
 - **Litecoin block explorer** — Litecoin chains now boot an [ltc-rpc-explorer]
   alongside (on by default, skipped by `up --bare`), completing UTXO explorer
   parity with Bitcoin. It's a maintained Litecoin fork of btc-rpc-explorer with
