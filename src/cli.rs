@@ -43,6 +43,15 @@ enum Commands {
         /// Path to a config file (default: ./wharfnet.toml, or $WHARFNET_CONFIG).
         #[arg(long, short = 'c', value_name = "PATH")]
         config: Option<PathBuf>,
+        /// Chains to boot — a kind (`evm`) or a name (`anvil-1`), repeatable
+        /// (e.g. `up evm solana`). Omit to boot every chain in the topology, or
+        /// set a default selection with `$WHARFNET_CHAINS=evm,solana`.
+        #[arg(value_name = "CHAIN")]
+        chains: Vec<String>,
+        /// Chains to skip — a kind or name, repeatable or comma-separated
+        /// (e.g. `up -x bitcoin,litecoin`). Applied after the selection above.
+        #[arg(long, short = 'x', value_name = "CHAIN", value_delimiter = ',')]
+        exclude: Vec<String>,
     },
     /// Tear down the local network and clean up state.
     Down,
@@ -69,6 +78,13 @@ enum Commands {
         /// Path to a config file (default: ./wharfnet.toml, or $WHARFNET_CONFIG).
         #[arg(long, short = 'c', value_name = "PATH")]
         config: Option<PathBuf>,
+        /// Chains to include — a kind or name, repeatable (as for `up`). Omit for
+        /// the whole topology, or set `$WHARFNET_CHAINS`.
+        #[arg(value_name = "CHAIN")]
+        chains: Vec<String>,
+        /// Chains to skip — a kind or name, repeatable or comma-separated.
+        #[arg(long, short = 'x', value_name = "CHAIN", value_delimiter = ',')]
+        exclude: Vec<String>,
     },
     /// Fund an address from the built-in faucet.
     Faucet {
@@ -338,6 +354,30 @@ pub fn main() {
     }
 }
 
+/// Split a comma-separated chain list (from `$WHARFNET_CHAINS`) into trimmed,
+/// non-empty terms.
+fn parse_chain_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Resolve the chain selection for `up`/`compose`: the positional `chains` if
+/// any were given, otherwise the comma-separated `$WHARFNET_CHAINS`, otherwise
+/// empty — which selects every chain.
+fn chain_selectors(chains: Vec<String>) -> Vec<String> {
+    if !chains.is_empty() {
+        return chains;
+    }
+    std::env::var(orchestrator::CHAINS_ENV)
+        .ok()
+        .map(|v| parse_chain_list(&v))
+        .unwrap_or_default()
+}
+
 /// Dispatch a parsed command. Kept separate from `main` so it returns a
 /// `Result` and is unit-testable.
 fn run(command: Commands) -> anyhow::Result<()> {
@@ -347,6 +387,8 @@ fn run(command: Commands) -> anyhow::Result<()> {
             reset,
             bare,
             config,
+            chains,
+            exclude,
         } => {
             let mode = if reset {
                 orchestrator::UpMode::Reset
@@ -355,12 +397,21 @@ fn run(command: Commands) -> anyhow::Result<()> {
             } else {
                 orchestrator::UpMode::Fresh
             };
-            orchestrator::up(mode, !bare, config.as_deref())
+            let selectors = chain_selectors(chains);
+            orchestrator::up(mode, !bare, config.as_deref(), &selectors, &exclude)
         }
         Commands::Down => orchestrator::down(),
         Commands::Status { json } => orchestrator::status(json),
         Commands::Logs { chain, follow } => orchestrator::logs(chain.as_deref(), follow),
-        Commands::Compose { bare, config } => orchestrator::print_compose(!bare, config.as_deref()),
+        Commands::Compose {
+            bare,
+            config,
+            chains,
+            exclude,
+        } => {
+            let selectors = chain_selectors(chains);
+            orchestrator::print_compose(!bare, config.as_deref(), &selectors, &exclude)
+        }
         Commands::Faucet {
             chain,
             address,
@@ -450,9 +501,65 @@ mod tests {
                 resume: false,
                 reset: false,
                 bare: false,
-                config: None
-            }
+                config: None,
+                ref chains,
+                ref exclude,
+            } if chains.is_empty() && exclude.is_empty()
         ));
+    }
+
+    #[test]
+    fn parse_chain_list_trims_and_drops_blanks() {
+        assert_eq!(parse_chain_list("evm,solana"), ["evm", "solana"]);
+        assert_eq!(parse_chain_list(" evm , , bitcoin "), ["evm", "bitcoin"]);
+        assert!(parse_chain_list("").is_empty());
+        assert!(parse_chain_list("  ,  ").is_empty());
+    }
+
+    #[test]
+    fn chain_selectors_prefers_positional_over_env() {
+        // Positional selectors are returned verbatim without consulting the env.
+        assert_eq!(chain_selectors(vec!["evm".into()]), ["evm"]);
+    }
+
+    #[test]
+    fn parses_up_chain_selectors_and_exclude() {
+        // Positional selectors are collected in order.
+        let cli = Cli::try_parse_from(["wharfnet", "up", "evm", "solana"]).unwrap();
+        match cli.command {
+            Commands::Up {
+                chains, exclude, ..
+            } => {
+                assert_eq!(chains, ["evm", "solana"]);
+                assert!(exclude.is_empty());
+            }
+            _ => panic!("expected up"),
+        }
+
+        // `-x` accepts commas and repetition; works alongside a selector.
+        let cli = Cli::try_parse_from([
+            "wharfnet",
+            "up",
+            "--reset",
+            "-x",
+            "bitcoin,litecoin",
+            "-x",
+            "zksync",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Up {
+                reset,
+                chains,
+                exclude,
+                ..
+            } => {
+                assert!(reset);
+                assert!(chains.is_empty());
+                assert_eq!(exclude, ["bitcoin", "litecoin", "zksync"]);
+            }
+            _ => panic!("expected up"),
+        }
     }
 
     #[test]
@@ -760,14 +867,18 @@ mod tests {
         assert!(
             run(Commands::Compose {
                 bare: false,
-                config: None
+                config: None,
+                chains: vec![],
+                exclude: vec![],
             })
             .is_ok()
         );
         assert!(
             run(Commands::Compose {
                 bare: true,
-                config: None
+                config: None,
+                chains: vec![],
+                exclude: vec![],
             })
             .is_ok()
         );
@@ -793,6 +904,8 @@ mod tests {
             reset: false,
             bare: true,
             config: None,
+            chains: vec![],
+            exclude: vec![],
         })
         .expect("up should succeed");
         run(Commands::Status { json: false }).expect("status should succeed");
@@ -967,11 +1080,15 @@ mod tests {
         run(Commands::Compose {
             bare: true,
             config: None,
+            chains: vec![],
+            exclude: vec![],
         })
         .expect("compose --bare renders");
         run(Commands::Compose {
             bare: false,
             config: None,
+            chains: vec![],
+            exclude: vec![],
         })
         .expect("compose with explorers renders");
     }

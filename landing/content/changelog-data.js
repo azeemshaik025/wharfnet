@@ -5,6 +5,15 @@ export const categories = ['zkSync', 'Solana', 'Starknet', 'EVM', 'UTXO', 'Core'
 
 export const entries = [
   {
+    date: 'July 24, 2026',
+    category: 'Core',
+    title: 'Boot a subset of chains',
+    changes: [
+      '`wharfnet up` and `wharfnet compose` now take chain **selectors** — a kind (`evm`) or a name (`anvil-1`), repeatable: `wharfnet up evm solana` boots just those, and only their images are pulled. `-x`/`--exclude` skips chains (`up -x bitcoin,litecoin`), and `$WHARFNET_CHAINS` sets a default selection for CI.',
+      'No selector still boots the whole topology, so the default is unchanged. Selectors reuse the same kind-or-name model as `faucet`/`logs`/chain control; unknown terms (or a selection that excludes everything) are rejected with the list of available chains.',
+    ],
+  },
+  {
     date: 'July 23, 2026',
     category: 'UTXO',
     tag: '#32',

@@ -37,12 +37,26 @@ cargo build --release
 ### Boot the network
 
 ```sh
-# chains + a block explorer each
+# every chain in the topology + a block explorer each
 wharfnet up
 
 # just the chains, without the explorers
 wharfnet up --bare
 ```
+
+You rarely need every chain at once. Pass a **selector** — a kind (`evm`) or a
+name (`anvil-1`) — to boot only what you need; only those chains' images are
+pulled and started:
+
+```sh
+wharfnet up evm                  # only the EVM chains
+wharfnet up evm solana           # several, by kind or name
+wharfnet up -x bitcoin,litecoin  # everything except these (repeatable / comma-separated)
+WHARFNET_CHAINS=evm,solana wharfnet up   # default selection for CI, no flags
+```
+
+With no selector, `up` boots the whole topology (unchanged). Selectors also work
+on `wharfnet compose` to preview the generated file for a subset.
 
 ### Check what's running
 

@@ -89,6 +89,11 @@ cargo build --release
 # boot the local multi-chain network — chains + a block explorer each
 wharfnet up
 
+# boot just the chains you need (a kind or a name) — only those images are pulled
+wharfnet up evm                  # only the EVM chains
+wharfnet up evm solana           # several, by kind or name
+wharfnet up -x bitcoin,litecoin  # everything except these
+
 # boot just the chains, without the explorers
 wharfnet up --bare
 
@@ -198,6 +203,10 @@ numeric `chain_id`; the others omit it (zkSync accepts an optional one,
 defaulting to anvil-zksync's 260). Accounts and test tokens come from the baked
 presets and aren't configured here. Run `wharfnet compose` to see the resolved
 setup — and to catch config errors — without booting anything.
+
+The config defines the **topology** (which chains exist); a `wharfnet up`/`compose`
+**selector** (`up evm`, `up anvil-1 solana-1`, `up -x bitcoin`) then picks which of
+them to boot — so you don't need a separate config just to run one chain.
 
 Bitcoin and Litecoin run their Core daemons in **regtest** with fixed dev RPC
 credentials (`wharfnet:wharfnet`), and at boot each mines a spendable balance into
