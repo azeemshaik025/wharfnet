@@ -7,6 +7,7 @@ export const entries = [
   {
     date: 'July 23, 2026',
     category: 'UTXO',
+    tag: '#32',
     title: 'Litecoin block explorer',
     changes: [
       'Litecoin chains now boot an **ltc-rpc-explorer** by default (`up --bare` to skip), completing UTXO explorer parity with Bitcoin — a maintained Litecoin fork of btc-rpc-explorer with the same design (straight to `litecoind` over RPC, no indexer/DB). Its URL is advertised in the `status`/manifest.',
@@ -16,6 +17,7 @@ export const entries = [
   {
     date: 'July 23, 2026',
     category: 'zkSync',
+    tag: '#33',
     title: 'zkSync chain',
     changes: [
       'A zkSync chain (`zksync-1`, `:8011`) now boots **by default**, running Matter Labs\' [`anvil-zksync`](https://github.com/matter-labs/anvil-zksync) in-memory node (the EraVM analogue of Anvil) from a pinned image, at chain id `260`. Selectable via `kind = "zksync"` in `wharfnet.toml`.',
@@ -25,6 +27,7 @@ export const entries = [
   {
     date: 'July 23, 2026',
     category: 'zkSync',
+    tag: '#33',
     title: 'zkSync faucet, chain control & forking',
     changes: [
       'The unified `faucet` tops up native ETH additively via the `anvil_setBalance` cheat (decimal coins, or wei with `--raw`). There are no bundled test tokens yet — EraVM test tokens are planned — so `--token` accepts only `ETH`.',
