@@ -92,6 +92,10 @@ pub(crate) fn manifest_path(base: &Path) -> PathBuf {
 /// off). EVM chains pair with a separate Otterscan container built later, but
 /// Starknet and Solana chains serve their explorer in-process, so the flag is
 /// baked into the engine here to reach its `--ui` / `--studio-port` compose arg.
+///
+/// Test-only: production paths go through [`selected_engines`] (this is the
+/// no-selection special case, kept for the tests that build the full set).
+#[cfg(test)]
 fn engines_for(config: &Config, explorer: bool) -> Vec<Box<dyn Engine>> {
     config
         .chains
@@ -155,6 +159,67 @@ fn engine_for(c: &config::ChainConfig, explorer: bool) -> Box<dyn Engine> {
         }
         other => unreachable!("validate() rejects unsupported kind '{other}'"),
     }
+}
+
+/// Env var that supplies a default chain selection for `up`/`compose` when no
+/// positional selector is given — the CI-friendly analogue of docker compose's
+/// `COMPOSE_PROFILES`. Comma-separated kinds or names, e.g. `WHARFNET_CHAINS=evm,solana`.
+pub(crate) const CHAINS_ENV: &str = "WHARFNET_CHAINS";
+
+/// Filter the configured chains down to the ones to actually boot.
+///
+/// `selectors` and `exclude` are each a list of kinds (`evm`) or names
+/// (`anvil-1`), matched the same way as `Manifest::select`. Empty `selectors`
+/// selects every chain (the default `wharfnet up`); `exclude` then drops any
+/// match. Chains are returned in config order, deduplicated, so engine order —
+/// and thus port/explorer assignment — is stable. Every provided term must match
+/// at least one chain, and the result must be non-empty; otherwise a clear error
+/// listing the available chains is returned (mirroring `Manifest::select`).
+fn select_chains<'a>(
+    chains: &'a [config::ChainConfig],
+    selectors: &[String],
+    exclude: &[String],
+) -> Result<Vec<&'a config::ChainConfig>> {
+    let available = || {
+        chains
+            .iter()
+            .map(|c| format!("{} ({})", c.name, c.kind))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    // Catch typos up front: every selector/exclude term must name a real chain.
+    for term in selectors.iter().chain(exclude.iter()) {
+        if !chains.iter().any(|c| &c.name == term || &c.kind == term) {
+            bail!("no chain matching '{term}'. Available: {}", available());
+        }
+    }
+    let selected: Vec<&config::ChainConfig> = chains
+        .iter()
+        .filter(|c| {
+            let included =
+                selectors.is_empty() || selectors.iter().any(|s| &c.name == s || &c.kind == s);
+            let excluded = exclude.iter().any(|x| &c.name == x || &c.kind == x);
+            included && !excluded
+        })
+        .collect();
+    if selected.is_empty() {
+        bail!("the selection excludes every chain — nothing to boot");
+    }
+    Ok(selected)
+}
+
+/// Build the engines for just the chains selected out of `config`
+/// (see [`select_chains`]).
+fn selected_engines(
+    config: &Config,
+    explorer: bool,
+    selectors: &[String],
+    exclude: &[String],
+) -> Result<Vec<Box<dyn Engine>>> {
+    Ok(select_chains(&config.chains, selectors, exclude)?
+        .into_iter()
+        .map(|c| engine_for(c, explorer))
+        .collect())
 }
 
 /// A resolved explorer for one chain: its service name, the host port it's
@@ -423,9 +488,15 @@ fn is_session_file(name: &str) -> bool {
 }
 
 /// Print the generated compose file to stdout without booting anything.
-/// Useful for inspecting or debugging what wharfnet will run.
-pub fn print_compose(explorer: bool, config_path: Option<&Path>) -> Result<()> {
-    let engines = engines_for(&config::load(config_path)?, explorer);
+/// Useful for inspecting or debugging what wharfnet will run. Honors the same
+/// chain `selectors`/`exclude` as `up`.
+pub fn print_compose(
+    explorer: bool,
+    config_path: Option<&Path>,
+    selectors: &[String],
+    exclude: &[String],
+) -> Result<()> {
+    let engines = selected_engines(&config::load(config_path)?, explorer, selectors, exclude)?;
     let explorers = if explorer {
         explorer_services(&engines)
     } else {
@@ -439,13 +510,21 @@ pub fn print_compose(explorer: bool, config_path: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
-pub fn up(mode: UpMode, explorer: bool, config_path: Option<&Path>) -> Result<()> {
-    up_in(
+pub fn up(
+    mode: UpMode,
+    explorer: bool,
+    config_path: Option<&Path>,
+    selectors: &[String],
+    exclude: &[String],
+) -> Result<()> {
+    up_in_selected(
         Path::new(DEFAULT_STATE_DIR),
         DEFAULT_PROJECT,
         mode,
         explorer,
         config_path,
+        selectors,
+        exclude,
     )
 }
 
@@ -466,6 +545,9 @@ pub fn logs(selector: Option<&str>, follow: bool) -> Result<()> {
     )
 }
 
+/// Boot every chain in the config (no selection). Thin wrapper over
+/// [`up_in_selected`] used by the test harness and the internal e2e tests.
+#[cfg(test)]
 pub(crate) fn up_in(
     base: &Path,
     project: &str,
@@ -473,8 +555,20 @@ pub(crate) fn up_in(
     explorer: bool,
     config_path: Option<&Path>,
 ) -> Result<()> {
+    up_in_selected(base, project, mode, explorer, config_path, &[], &[])
+}
+
+pub(crate) fn up_in_selected(
+    base: &Path,
+    project: &str,
+    mode: UpMode,
+    explorer: bool,
+    config_path: Option<&Path>,
+    selectors: &[String],
+    exclude: &[String],
+) -> Result<()> {
     docker::ensure_available()?;
-    let engines = engines_for(&config::load(config_path)?, explorer);
+    let engines = selected_engines(&config::load(config_path)?, explorer, selectors, exclude)?;
     let state_mode = mode.state_mode();
     let explorers = if explorer {
         explorer_services(&engines)
@@ -1081,8 +1175,8 @@ mod tests {
 
     #[test]
     fn print_compose_is_ok() {
-        assert!(print_compose(false, None).is_ok());
-        assert!(print_compose(true, None).is_ok());
+        assert!(print_compose(false, None, &[], &[]).is_ok());
+        assert!(print_compose(true, None, &[], &[]).is_ok());
     }
 
     #[test]
@@ -1124,6 +1218,114 @@ mod tests {
             ports.iter().collect::<std::collections::HashSet<_>>().len(),
             7
         );
+    }
+
+    fn names(selected: &[&config::ChainConfig]) -> Vec<String> {
+        selected.iter().map(|c| c.name.clone()).collect()
+    }
+
+    #[test]
+    fn select_chains_empty_selects_everything_in_order() {
+        let c = Config::default();
+        let all = select_chains(&c.chains, &[], &[]).unwrap();
+        assert_eq!(
+            names(&all),
+            [
+                "anvil-1",
+                "anvil-2",
+                "starknet-1",
+                "solana-1",
+                "bitcoin-1",
+                "litecoin-1",
+                "zksync-1"
+            ]
+        );
+    }
+
+    #[test]
+    fn select_chains_by_kind_and_name() {
+        let c = Config::default();
+        // A kind selects every chain of that kind, in config order.
+        assert_eq!(
+            names(&select_chains(&c.chains, &["evm".into()], &[]).unwrap()),
+            ["anvil-1", "anvil-2"]
+        );
+        // A name selects exactly one.
+        assert_eq!(
+            names(&select_chains(&c.chains, &["solana-1".into()], &[]).unwrap()),
+            ["solana-1"]
+        );
+        // Multiple selectors union, deduplicated, config order preserved even
+        // when a name overlaps a kind already matched.
+        assert_eq!(
+            names(
+                &select_chains(
+                    &c.chains,
+                    &["zksync".into(), "evm".into(), "anvil-1".into()],
+                    &[]
+                )
+                .unwrap()
+            ),
+            ["anvil-1", "anvil-2", "zksync-1"]
+        );
+    }
+
+    #[test]
+    fn select_chains_exclude_drops_matches() {
+        let c = Config::default();
+        // Exclude on the default (all) set.
+        assert_eq!(
+            names(&select_chains(&c.chains, &[], &["bitcoin".into(), "litecoin".into()]).unwrap()),
+            ["anvil-1", "anvil-2", "starknet-1", "solana-1", "zksync-1"]
+        );
+        // Exclude combined with a selector.
+        assert_eq!(
+            names(&select_chains(&c.chains, &["evm".into()], &["anvil-2".into()]).unwrap()),
+            ["anvil-1"]
+        );
+    }
+
+    #[test]
+    fn select_chains_rejects_unknown_terms() {
+        let c = Config::default();
+        let err = select_chains(&c.chains, &["dogecoin".into()], &[]).unwrap_err();
+        assert!(
+            err.to_string().contains("no chain matching 'dogecoin'"),
+            "{err}"
+        );
+        assert!(err.to_string().contains("Available:"), "{err}");
+        // An unknown exclude term is caught too.
+        let err = select_chains(&c.chains, &[], &["nope".into()]).unwrap_err();
+        assert!(
+            err.to_string().contains("no chain matching 'nope'"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn select_chains_rejects_an_empty_result() {
+        let c = Config::default();
+        let err = select_chains(&c.chains, &["evm".into()], &["evm".into()]).unwrap_err();
+        assert!(err.to_string().contains("excludes every chain"), "{err}");
+    }
+
+    #[test]
+    fn selected_engines_renders_only_the_chosen_chains() {
+        // `compose`-style render of a subset contains only the selected services.
+        let config = Config::default();
+        let engines = selected_engines(&config, false, &["evm".into()], &[]).unwrap();
+        let out = render_compose(&engines, StateMode::Ephemeral, &[]);
+        assert!(out.contains("anvil-1:"));
+        assert!(out.contains("anvil-2:"));
+        assert!(
+            !out.contains("solana-1:"),
+            "solana must not be rendered: {out}"
+        );
+        assert!(
+            !out.contains("zksync-1:"),
+            "zksync must not be rendered: {out}"
+        );
+        assert!(!out.contains("bitcoin-1:"));
     }
 
     #[test]
