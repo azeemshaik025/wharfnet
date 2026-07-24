@@ -15,7 +15,8 @@ instead of hand-writing config in Rust.
     - `starknet.yml` — starknet-devnet service
     - `utxo.yml` — bitcoind / litecoind (Bitcoin, Litecoin) regtest service
     - `zksync.yml` — anvil-zksync (zkSync) service
-    - `otterscan.yml`, `btc-rpc-explorer.yml` — bundled block-explorer sidecars
+    - `otterscan.yml`, `btc-rpc-explorer.yml`, `ltc-rpc-explorer.yml` — bundled
+      block-explorer sidecars
 - `contracts/` — test-token sources (ERC-20 / Cairo) baked into the chain snapshots
 - `abi/`, `presets/`, `state/` — embedded ABIs, canonical-contract presets, and
   baked chain state (see `presets/README.md`)
