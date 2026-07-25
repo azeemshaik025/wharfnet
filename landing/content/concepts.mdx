@@ -1,0 +1,124 @@
+---
+title: Concepts
+---
+
+import { Callout } from 'nextra/components'
+
+# Concepts
+
+The mental model behind wharfnet. Read this once and the [CLI](/reference/cli),
+[config](/reference/config), and [manifest](/reference/manifest) references all
+click into place.
+
+## What wharfnet is
+
+wharfnet is a **one-command, disposable multi-chain localnet**. `wharfnet up`
+boots real dev nodes for several chains at once — each in its own Docker
+container — pre-funded, with test tokens at known addresses, behind one config,
+one manifest, and one `status`. It's for local development, integration/E2E
+testing, and CI — not a substitute for a real testnet, and not a model of a
+production validator network (each chain is a single dev node).
+
+## The topology
+
+A **topology** is the set of chains a localnet runs. With no config, wharfnet
+boots this default topology:
+
+| Chain | Kind | Node | RPC port | Chain ID |
+| --- | --- | --- | --- | --- |
+| `anvil-1` | evm | Anvil | `8545` | `31337` |
+| `anvil-2` | evm | Anvil | `8546` | `31338` |
+| `starknet-1` | starknet | starknet-devnet | `5050` | `SN_SEPOLIA` |
+| `solana-1` | solana | surfpool | `8899` (+ `8900` WS) | `localnet` |
+| `bitcoin-1` | bitcoin | bitcoind (regtest) | `18443` | `regtest` |
+| `litecoin-1` | litecoin | litecoind (regtest) | `19443` | `regtest` |
+| `zksync-1` | zksync | anvil-zksync | `8011` | `260` |
+
+Customize it with a [`wharfnet.toml`](/reference/config), or boot a subset with
+`wharfnet up <chain>...` / `-x <chain>`.
+
+## Chain kinds
+
+Each **kind** wraps a best-in-class dev node. wharfnet doesn't implement chains —
+it gives them a uniform surface. What differs between kinds is which cheats they
+support (see the [CLI verb matrix](/reference/cli#verb-support-by-chain)) and
+whether they carry test tokens:
+
+| Kind | Node | Test tokens | Forking |
+| --- | --- | --- | --- |
+| `evm` | Anvil | ✅ (USDC, WBTC, …) | ✅ |
+| `zksync` | anvil-zksync | — (planned) | ✅ |
+| `starknet` | starknet-devnet | ✅ | ✅ |
+| `solana` | surfpool | ✅ (SPL) | ✅ (no block pin) |
+| `bitcoin` / `litecoin` | bitcoind / litecoind | — (native coin only) | — (regtest) |
+
+## The manifest — the source of truth
+
+When a localnet boots, wharfnet writes **`.wharfnet/wharfnet.json`** — the
+machine-readable description of everything running: RPC/WS URLs, chain IDs,
+funded accounts (with keys), token addresses, and explorer URLs.
+
+<Callout type="info">
+  **Never hard-code endpoints.** Read the manifest instead — via
+  [`testkit`](/reference/testkit) in Rust, `wharfnet status --json` in a shell,
+  or by parsing the JSON directly. That's what makes tests reproducible across
+  machines.
+</Callout>
+
+## Deterministic accounts & tokens
+
+Every boot is **deterministic**: the same funded dev accounts and the same token
+addresses, every time. Accounts and tokens come from each engine's baked state,
+not your config — so a test written against `account(0)` or the `USDC` address
+works on any machine, every run. This is the property that makes wharfnet useful
+in CI.
+
+## State modes — ephemeral vs. persistent
+
+By default a boot is **ephemeral**: it starts fresh from the baked state and
+discards runtime changes on `down`. Two flags change that:
+
+| `up` mode | Behavior |
+| --- | --- |
+| *(default)* | **Fresh** — boot from baked state; leave any saved session untouched. |
+| `--resume` | **Persistent** — restore the previous session if one exists, and keep saving. Balances, txs, and deployments survive `down` → `up --resume`. |
+| `--reset` | Discard any saved session, then boot fresh. |
+
+Persistence is per-chain and stored under `.wharfnet/state/`. Support varies:
+EVM, Starknet, Solana, Bitcoin, and Litecoin persist; zkSync is ephemeral for now.
+
+## Forking
+
+A chain can mirror a **live network's state** instead of the baked test tokens by
+setting `fork_url` (see [config](/reference/config)). Forked chains are
+copy-on-read, so you can test against real deployed protocols locally. Combined
+with `impersonate`, you can act as any account (a whale, a contract owner)
+without its key. `${VAR}` in a `fork_url` is expanded from the environment, so RPC
+keys stay out of the file.
+
+## Block explorers
+
+Each chain boots a bundled block explorer by default (Otterscan for EVM,
+btc/ltc-rpc-explorer for UTXO, in-process UIs for Solana/Starknet), published on a
+host port and advertised in the manifest's `explorer` field. `wharfnet up --bare`
+skips them.
+
+## The state directory
+
+A running localnet keeps everything under **`.wharfnet/`** in your working
+directory:
+
+```
+.wharfnet/
+├── wharfnet.json      # the manifest (endpoints, accounts, tokens)
+├── docker-compose.yml # the generated compose file
+└── state/             # per-chain persistent session data (with --resume)
+```
+
+## Typical agent / test workflow
+
+1. `wharfnet up` (optionally a subset, e.g. `wharfnet up evm`).
+2. Read `.wharfnet/wharfnet.json` (or `wharfnet status --json`) for endpoints and accounts.
+3. Point your client/service/tests at the RPC URLs; fund extra addresses with `wharfnet faucet`.
+4. Drive the chain as needed — `mine`, `warp`, `impersonate`, `snapshot`/`revert`.
+5. `wharfnet down` when finished.

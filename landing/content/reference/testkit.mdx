@@ -1,0 +1,120 @@
+---
+title: testkit Reference (Rust)
+---
+
+import { Callout } from 'nextra/components'
+
+# `testkit` Reference — Rust test-utils API
+
+wharfnet is a library as well as a CLI. Add it as a dev-dependency and connect to
+a running localnet from an integration test — no hard-coded URLs or token
+addresses, everything read from the [manifest](/reference/manifest) that
+`wharfnet up` writes.
+
+```toml
+# Cargo.toml
+[dev-dependencies]
+wharfnet = "0.1.0-alpha.1"   # pre-release: pin the exact version
+```
+
+<Callout type="info">
+  `testkit` **reads** a running localnet; it does not boot one. Run `wharfnet up`
+  first (e.g. in a test setup script or CI step), then connect.
+</Callout>
+
+## Quick start
+
+```rust
+use wharfnet::testkit::Localnet;
+
+let net = Localnet::connect()?;      // reads ./.wharfnet/wharfnet.json
+let evm = net.evm();                 // first EVM chain (panics if none)
+let rpc = evm.rpc_url();             // "http://127.0.0.1:8545"
+let usdc = evm.token("USDC");        // { symbol, name, address, decimals }
+let dev0 = evm.account(0);           // funded signer: address + private_key
+let abi = evm.token_abi("USDC");     // Option<&'static str> — embedded ABI
+```
+
+## `Localnet`
+
+A handle to a running localnet, constructed from the manifest.
+
+| Method | Returns | Description |
+| --- | --- | --- |
+| `Localnet::connect()` | `Result<Localnet>` | Read `.wharfnet/wharfnet.json` in the current directory. Errors with a hint if nothing is running. |
+| `Localnet::connect_from(dir)` | `Result<Localnet>` | Connect from an explicit `.wharfnet` state dir (when the test runs from a different cwd than `up`). |
+| `.chains()` | `impl Iterator<Item = Chain>` | Every chain in the manifest. |
+| `.chain(name)` | `Result<Chain>` | A chain by exact name (`"anvil-1"`). |
+| `.of_kind(kind)` | `Result<Chain>` | The first chain of a kind (`"evm"`, `"zksync"`, `"bitcoin"`…). |
+| `.evm()` | `Chain` | First EVM chain. **Panics** if none — convenient when a missing chain is a setup error. |
+| `.solana()` | `Chain` | First Solana chain (panics if none). |
+| `.starknet()` | `Chain` | First Starknet chain (panics if none). |
+
+<Callout type="info">
+  Convenience accessors exist for `evm()` / `solana()` / `starknet()`. For zkSync,
+  Bitcoin, or Litecoin use `of_kind("zksync")` or `chain("zksync-1")`.
+</Callout>
+
+## `Chain`
+
+A borrowed view over one manifest chain entry — cheap to copy. Accessors return
+references tied to the manifest, so values outlive the temporary `Chain`.
+
+| Method | Returns | Description |
+| --- | --- | --- |
+| `.name()` | `&str` | Chain name (`"anvil-1"`). |
+| `.kind()` | `&str` | Chain kind (`"evm"`). |
+| `.rpc_url()` | `&str` | HTTP JSON-RPC URL — point your client here. |
+| `.ws_url()` | `Option<&str>` | WebSocket URL when served on a distinct port (Solana); `None` otherwise. |
+| `.chain_id()` | `&str` | Chain id as a string (`"31337"`, a felt, `"localnet"`, `"regtest"`). |
+| `.explorer()` | `Option<&str>` | Bundled explorer URL, when booted (skipped by `--bare`). |
+| `.accounts()` | `&[Account]` | All funded dev accounts. |
+| `.account(i)` | `&Account` | The i-th account. **Panics** if out of range. |
+| `.tokens()` | `&[Token]` | Pre-deployed test tokens. |
+| `.token(symbol)` | `&Token` | A token by symbol. **Panics** if this chain lacks it. |
+| `.try_token(symbol)` | `Option<&Token>` | A token by symbol, or `None`. |
+| `.token_abi(symbol)` | `Option<&'static str>` | Embedded contract ABI JSON (EVM/Starknet); `None` for Solana SPL and Starknet fee tokens. |
+| `.entry()` | `&ChainEntry` | The raw manifest entry, for fields not surfaced above (e.g. `contracts`, `fork`). |
+
+`Account`, `Token`, and `ChainEntry` are the [manifest](/reference/manifest)
+types, re-exported from the crate root (`wharfnet::{Account, Token, ChainEntry, …}`).
+
+## Embedded ABIs — `wharfnet::abi`
+
+The bundled test tokens' contract ABIs are embedded so you can instantiate a
+token without fetching or hand-writing one. Prefer `Chain::token_abi(symbol)`;
+the raw constants are also exported:
+
+| Constant | Contents |
+| --- | --- |
+| `wharfnet::abi::evm::TEST_TOKEN` | Standard EVM ERC-20 test token ABI. |
+| `wharfnet::abi::evm::FEE_TOKEN` | Fee-on-transfer token ABI. |
+| `wharfnet::abi::evm::REBASING_TOKEN` | Rebasing token ABI. |
+| `wharfnet::abi::evm::NO_RETURN_TOKEN` | Non-standard (no-return) ERC-20 ABI. |
+| `wharfnet::abi::starknet::TEST_TOKEN` | Starknet test token ABI. |
+| `wharfnet::abi::starknet::FEE_TOKEN` | Starknet fee token ABI. |
+| `wharfnet::abi::starknet::REBASING_TOKEN` | Starknet rebasing token ABI. |
+| `wharfnet::abi::token_abi(kind, symbol)` | Look up an ABI by chain kind + symbol; `None` if not shipped. |
+
+Solana tokens are standard SPL, so no custom interface is shipped.
+
+## Example: an integration test
+
+```rust
+use wharfnet::testkit::Localnet;
+
+#[test]
+fn transfers_usdc_between_dev_accounts() -> anyhow::Result<()> {
+    let net = Localnet::connect()?;
+    let evm = net.evm();
+
+    let usdc = evm.token("USDC");
+    let (from, to) = (evm.account(0), evm.account(1));
+
+    // Point viem/ethers/alloy at evm.rpc_url(), sign with from.private_key,
+    // call transfer() on usdc.address using evm.token_abi("USDC").
+    // ...
+    let _ = (usdc, from, to, evm.chain_id());
+    Ok(())
+}
+```

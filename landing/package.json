@@ -4,7 +4,10 @@
   "private": true,
   "description": "Documentation site for wharfnet",
   "scripts": {
+    "gen-llms": "node scripts/gen-llms.mjs",
+    "predev": "node scripts/gen-llms.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/gen-llms.mjs",
     "build": "next build",
     "postbuild": "pagefind --site out --output-subdir _pagefind",
     "start": "next start"

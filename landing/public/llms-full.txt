@@ -1,0 +1,1860 @@
+# wharfnet — full documentation
+
+> One-command localnet for EVM, Solana, Starknet, Bitcoin, Litecoin & zkSync — boot real dev nodes for every chain your app touches with a single command, with funded accounts, fixed-address test tokens, a unified faucet, chain-control cheats, forking, and a machine-readable manifest for tests and agents.
+
+Source: https://sainathr19.github.io/wharfnet/
+
+---
+
+# Getting Started
+
+Source: https://sainathr19.github.io/wharfnet/getting-started/
+
+## Prerequisites
+
+wharfnet runs each chain as a container, so it needs **Docker with the Compose
+plugin** (`docker compose`) and a running daemon. Every command that boots or
+drives a chain — `up`, `down`, `faucet`, and `wharfnet evm …` — shells out to
+`docker compose`, so CI runners need a Docker daemon available too.
+
+  You do **not** need Foundry, a Solana toolchain, or a Starknet devnet
+  installed: each chain runs from a pinned image, and per-chain tooling (e.g.
+  `cast`) runs inside the container, so installing Docker is the whole setup.
+  Building from source also needs a stable **Rust** toolchain.
+
+Without Docker, chain commands fail fast with a clear message; only
+`wharfnet compose` (render the Compose file) and `wharfnet status` (read the
+manifest) run without it.
+
+## Quickstart
+
+### Build
+
+```sh
+cargo build --release
+```
+
+### Boot the network
+
+```sh
+# every chain in the topology + a block explorer each
+wharfnet up
+
+# just the chains, without the explorers
+wharfnet up --bare
+```
+
+You rarely need every chain at once. Pass a **selector** — a kind (`evm`) or a
+name (`anvil-1`) — to boot only what you need; only those chains' images are
+pulled and started:
+
+```sh
+wharfnet up evm                  # only the EVM chains
+wharfnet up evm solana           # several, by kind or name
+wharfnet up -x bitcoin,litecoin  # everything except these (repeatable / comma-separated)
+WHARFNET_CHAINS=evm,solana wharfnet up   # default selection for CI, no flags
+```
+
+With no selector, `up` boots the whole topology (unchanged). Selectors also work
+on `wharfnet compose` to preview the generated file for a subset.
+
+### Check what's running
+
+```sh
+wharfnet status          # formatted, human-readable report
+wharfnet status --json   # machine-readable, for CI and scripts
+```
+
+`status` prints every chain's RPC (and WebSocket) URL, funded accounts, test
+tokens, and explorer — the same data written to `.wharfnet/wharfnet.json`.
+
+Add `--json` to emit a stable document instead: a top-level `running` flag (so a
+script can tell whether a localnet is up), the `project` name, and a `chains`
+array carrying the exact manifest schema — RPC URLs, chain IDs, accounts, and
+tokens. When nothing is running it's still valid JSON (`running: false`, empty
+`chains`), so a pipeline can branch on it without error handling:
+
+```sh
+# wait for the localnet, then read the first EVM chain's RPC in CI
+wharfnet status --json | jq -r '.chains[] | select(.kind=="evm") | .rpc'
+```
+
+### Fund an address
+
+```sh
+# native coin + every bundled token, on all EVM chains
+wharfnet faucet evm 0xabc... 100
+
+# the same command funds Starknet and Solana
+wharfnet faucet starknet 0x05a1... 100
+wharfnet faucet solana 9WzD…AWWM 100
+```
+
+### Tear it down
+
+```sh
+wharfnet down
+```
+
+## Resuming a session
+
+By default `wharfnet up` boots a **fresh, deterministic** network every time, and
+runtime changes (faucet top-ups, transactions, deploys) are discarded on `down`.
+To pick up where you left off:
+
+| Command | Behaviour |
+| ------- | --------- |
+| `wharfnet up` | Fresh boot from the baked snapshot. Runtime changes are not saved. |
+| `wharfnet up --resume` | Restore the previous session if one exists (else fresh), and **keep saving** — balances, txs, and deployments survive `down` → `up --resume`. |
+| `wharfnet up --reset` | Discard any saved session, then boot fresh. |
+
+Each chain persists to a per-chain session under `.wharfnet/state/` that it
+reloads on the next `--resume`; the exact mechanism per chain kind is documented
+in the per-chain guides. `--resume` and `--reset` are mutually exclusive. (zkSync
+is the exception — it's ephemeral for now, so `--resume` boots it fresh.)
+
+## Configuration
+
+wharfnet runs zero-config — two Anvil chains, a Starknet chain, a Solana chain,
+Bitcoin + Litecoin regtest chains, and a zkSync chain by default (`anvil-1` :8545,
+`anvil-2` :8546, `starknet-1` :5050, `solana-1` :8899, `bitcoin-1` :18443,
+`litecoin-1` :19443, `zksync-1` :8011). To customise the topology — including
+dropping a chain — write
+a `wharfnet.toml` in your project root (a config replaces the defaults entirely):
+
+```toml filename="wharfnet.toml"
+[[chains]]
+name = "anvil-1"
+port = 8545
+chain_id = 31337
+block_time = 1      # optional, defaults to 1
+
+[[chains]]
+name = "sn-1"
+kind = "starknet"   # boots a starknet-devnet chain
+port = 5050         # RPC is published at http://127.0.0.1:5050/rpc
+
+[[chains]]
+name = "sol-1"
+kind = "solana"     # boots a surfpool chain
+port = 8899
+```
+
+Each chain needs a unique `name` and `port`; `kind` defaults to `evm` and may be
+`starknet`, `solana`, `bitcoin`, `litecoin`, or `zksync`. EVM chains need a
+numeric `chain_id`; the others omit it (zkSync accepts an optional one, defaulting
+to anvil-zksync's 260). Accounts and test tokens come from the baked presets and
+aren't configured here. Run `wharfnet compose` to see the resolved setup — and to
+catch config errors — without booting anything.
+
+By default wharfnet reads `./wharfnet.toml`. Point at a different file with
+`--config <path>` (or `-c`) on `up`/`compose`, or the `WHARFNET_CONFIG` env var:
+
+```sh
+wharfnet up --config fork.toml
+WHARFNET_CONFIG=ci.toml wharfnet up
+```
+
+Any chain can fork a live network by adding `fork_url` (and, for EVM/Starknet,
+`fork_block`) — see the per-chain guides for the specifics.
+
+---
+
+# Concepts
+
+Source: https://sainathr19.github.io/wharfnet/concepts/
+
+The mental model behind wharfnet. Read this once and the [CLI](/reference/cli),
+[config](/reference/config), and [manifest](/reference/manifest) references all
+click into place.
+
+## What wharfnet is
+
+wharfnet is a **one-command, disposable multi-chain localnet**. `wharfnet up`
+boots real dev nodes for several chains at once — each in its own Docker
+container — pre-funded, with test tokens at known addresses, behind one config,
+one manifest, and one `status`. It's for local development, integration/E2E
+testing, and CI — not a substitute for a real testnet, and not a model of a
+production validator network (each chain is a single dev node).
+
+## The topology
+
+A **topology** is the set of chains a localnet runs. With no config, wharfnet
+boots this default topology:
+
+| Chain | Kind | Node | RPC port | Chain ID |
+| --- | --- | --- | --- | --- |
+| `anvil-1` | evm | Anvil | `8545` | `31337` |
+| `anvil-2` | evm | Anvil | `8546` | `31338` |
+| `starknet-1` | starknet | starknet-devnet | `5050` | `SN_SEPOLIA` |
+| `solana-1` | solana | surfpool | `8899` (+ `8900` WS) | `localnet` |
+| `bitcoin-1` | bitcoin | bitcoind (regtest) | `18443` | `regtest` |
+| `litecoin-1` | litecoin | litecoind (regtest) | `19443` | `regtest` |
+| `zksync-1` | zksync | anvil-zksync | `8011` | `260` |
+
+Customize it with a [`wharfnet.toml`](/reference/config), or boot a subset with
+`wharfnet up <chain>...` / `-x <chain>`.
+
+## Chain kinds
+
+Each **kind** wraps a best-in-class dev node. wharfnet doesn't implement chains —
+it gives them a uniform surface. What differs between kinds is which cheats they
+support (see the [CLI verb matrix](/reference/cli#verb-support-by-chain)) and
+whether they carry test tokens:
+
+| Kind | Node | Test tokens | Forking |
+| --- | --- | --- | --- |
+| `evm` | Anvil | ✅ (USDC, WBTC, …) | ✅ |
+| `zksync` | anvil-zksync | — (planned) | ✅ |
+| `starknet` | starknet-devnet | ✅ | ✅ |
+| `solana` | surfpool | ✅ (SPL) | ✅ (no block pin) |
+| `bitcoin` / `litecoin` | bitcoind / litecoind | — (native coin only) | — (regtest) |
+
+## The manifest — the source of truth
+
+When a localnet boots, wharfnet writes **`.wharfnet/wharfnet.json`** — the
+machine-readable description of everything running: RPC/WS URLs, chain IDs,
+funded accounts (with keys), token addresses, and explorer URLs.
+
+  **Never hard-code endpoints.** Read the manifest instead — via
+  [`testkit`](/reference/testkit) in Rust, `wharfnet status --json` in a shell,
+  or by parsing the JSON directly. That's what makes tests reproducible across
+  machines.
+
+## Deterministic accounts & tokens
+
+Every boot is **deterministic**: the same funded dev accounts and the same token
+addresses, every time. Accounts and tokens come from each engine's baked state,
+not your config — so a test written against `account(0)` or the `USDC` address
+works on any machine, every run. This is the property that makes wharfnet useful
+in CI.
+
+## State modes — ephemeral vs. persistent
+
+By default a boot is **ephemeral**: it starts fresh from the baked state and
+discards runtime changes on `down`. Two flags change that:
+
+| `up` mode | Behavior |
+| --- | --- |
+| *(default)* | **Fresh** — boot from baked state; leave any saved session untouched. |
+| `--resume` | **Persistent** — restore the previous session if one exists, and keep saving. Balances, txs, and deployments survive `down` → `up --resume`. |
+| `--reset` | Discard any saved session, then boot fresh. |
+
+Persistence is per-chain and stored under `.wharfnet/state/`. Support varies:
+EVM, Starknet, Solana, Bitcoin, and Litecoin persist; zkSync is ephemeral for now.
+
+## Forking
+
+A chain can mirror a **live network's state** instead of the baked test tokens by
+setting `fork_url` (see [config](/reference/config)). Forked chains are
+copy-on-read, so you can test against real deployed protocols locally. Combined
+with `impersonate`, you can act as any account (a whale, a contract owner)
+without its key. `${VAR}` in a `fork_url` is expanded from the environment, so RPC
+keys stay out of the file.
+
+## Block explorers
+
+Each chain boots a bundled block explorer by default (Otterscan for EVM,
+btc/ltc-rpc-explorer for UTXO, in-process UIs for Solana/Starknet), published on a
+host port and advertised in the manifest's `explorer` field. `wharfnet up --bare`
+skips them.
+
+## The state directory
+
+A running localnet keeps everything under **`.wharfnet/`** in your working
+directory:
+
+```
+.wharfnet/
+├── wharfnet.json      # the manifest (endpoints, accounts, tokens)
+├── docker-compose.yml # the generated compose file
+└── state/             # per-chain persistent session data (with --resume)
+```
+
+## Typical agent / test workflow
+
+1. `wharfnet up` (optionally a subset, e.g. `wharfnet up evm`).
+2. Read `.wharfnet/wharfnet.json` (or `wharfnet status --json`) for endpoints and accounts.
+3. Point your client/service/tests at the RPC URLs; fund extra addresses with `wharfnet faucet`.
+4. Drive the chain as needed — `mine`, `warp`, `impersonate`, `snapshot`/`revert`.
+5. `wharfnet down` when finished.
+
+---
+
+# Chains overview
+
+Source: https://sainathr19.github.io/wharfnet/chains/overview/
+
+`wharfnet up` boots every supported chain side by side behind one config, one
+manifest, and one `status`. Each runs from a pinned Docker image with funded dev
+accounts and — where the VM supports them — test tokens at fixed addresses and a
+built-in block explorer. The same verbs (`up`, `faucet`, per-chain control) work
+the same way across all of them.
+
+| Chain | Default node | Default RPC | Test tokens | Explorer | Forking |
+| ----- | ------------ | ----------- | ----------- | -------- | ------- |
+| [**EVM**](/chains/evm) | Anvil | `:8545`, `:8546` | USDC, WBTC, FEE, REB, NRT (+ Multicall3, Permit2, CREATE2) | Otterscan | ✓ (`fork_url` + `fork_block`) |
+| [**Starknet**](/chains/starknet) | starknet-devnet | `:5050` | USDC, WBTC, FEE, REB | built-in (`--ui`) | ✓ (`fork_url` + `fork_block`) |
+| [**Solana**](/chains/solana) | surfpool | `:8899` (+ `:8900` WS) | USDC, WBTC | Studio | ✓ (`fork_url`) |
+| [**Bitcoin**](/chains/bitcoin) | bitcoind (regtest) | `:18443` | — (native BTC only) | btc-rpc-explorer | — |
+| [**Litecoin**](/chains/litecoin) | litecoind (regtest) | `:19443` | — (native LTC only) | ltc-rpc-explorer | — |
+| [**zkSync**](/chains/zksync) | anvil-zksync | `:8011` | — (native ETH only, planned) | planned (TODO) | ✓ (`fork_url` + `fork_block`) |
+
+Every chain except zkSync supports **opt-in persistence** — `wharfnet up --resume`
+keeps balances, transactions, and deployments across restarts, and `--reset`
+discards a saved session (zkSync is ephemeral for now — persistence is planned).
+See [State & persistence](/getting-started#resuming-a-session) for the shared
+model.
+
+## Per-chain guides
+
+- [**EVM**](/chains/evm) — Anvil, test tokens and canonical contracts at fixed
+  addresses, chain control (mine, time-travel, snapshot/revert, impersonate),
+  forking, and the Otterscan explorer.
+- [**Starknet**](/chains/starknet) — starknet-devnet, Cairo test tokens, chain
+  control, forking, and the built-in explorer.
+- [**Solana**](/chains/solana) — surfpool, SPL test tokens, WebSocket RPC, slot /
+  clock control, forking, and the Studio explorer.
+- [**Bitcoin**](/chains/bitcoin) — bitcoind regtest, a funded coinbase wallet,
+  native-BTC faucet, on-demand block mining, and the btc-rpc-explorer.
+- [**Litecoin**](/chains/litecoin) — litecoind regtest (a Bitcoin Core fork), a
+  funded coinbase wallet, native-LTC faucet, and on-demand block mining; bundled
+  explorer planned (TODO).
+- [**zkSync**](/chains/zksync) — anvil-zksync, funded dev accounts, native-ETH
+  faucet, the full EVM control set (mine, time-travel, snapshot/revert,
+  impersonate), and forking; test tokens and a bundled explorer planned (TODO).
+
+Adding a chain kind is a matter of implementing the `Engine` trait — see
+[Contributing](/contributing#adding-a-chain-kind-or-capability).
+
+---
+
+# EVM
+
+Source: https://sainathr19.github.io/wharfnet/chains/evm/
+
+`wharfnet up` boots two [Anvil](https://book.getfoundry.sh/anvil/) chains by
+default — `anvil-1` on `:8545` and `anvil-2` on `:8546` — each with pre-deployed
+test tokens, canonical infra contracts, and a block explorer.
+
+```sh
+wharfnet up
+cast chain-id --rpc-url http://127.0.0.1:8545   # -> 31337
+```
+
+  Writing Rust tests? Don't hard-code the addresses below — read them from a
+  running localnet with [`wharfnet::testkit`](/examples): `net.evm().rpc_url()`,
+  `.token("USDC")`, `.account(0)`, and `.token_abi("USDC")`.
+
+## Test tokens
+
+Every EVM chain boots with test tokens pre-deployed at fixed addresses
+(identical on all chains) from a baked-in Anvil state snapshot — no deploy step
+required. Each has a **public `mint(address,uint256)`** so a faucet (or your
+tests) can top up any address on demand. The first two are standard, well-behaved
+ERC-20s; the rest are deliberately **non-standard** for token-integration testing:
+
+| Token | Decimals | Address | Behaviour |
+| ----- | -------- | ------- | --------- |
+| USDC  | 6  | `0x5FbDB2315678afecb367f032d93F642f64180aa3` | standard |
+| WBTC  | 8  | `0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512` | standard |
+| FEE   | 18 | `0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0` | fee-on-transfer (1% burned on `transfer`) |
+| REB   | 18 | `0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9` | rebasing (`rebase(uint256)` rescales balances) |
+| NRT   | 6  | `0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9` | no return value (USDT-style `transfer`/`approve`) |
+
+The non-standard tokens let you verify that your contracts and integrations
+handle real-world token behaviour — amount-received ≠ amount-sent, balances that
+move with no transfer, and calls that don't return a decodable `bool`.
+
+The dev accounts are pre-seeded with a balance of each. Regenerate the
+snapshot after editing the token sources with `./scripts/gen-token-state.sh`.
+
+## Canonical contracts
+
+Every EVM chain also boots with the infrastructure contracts that live at the
+**same address on every real chain**, so client libraries and deploy tooling
+that hardcode these addresses work without per-chain wiring:
+
+| Contract         | Address                                      | Used by |
+| ---------------- | -------------------------------------------- | ------- |
+| Multicall3       | `0xcA11bde05977b3631167028862bE2a173976CA11` | viem / ethers / wagmi batch reads |
+| Permit2          | `0x000000000022D473030F116dDEE9F6B43aC78BA3` | Uniswap & signature-based approvals |
+| CREATE2 Deployer | `0x4e59b44847b379578588920cA78FbF26c0B4956C` | `forge create --create2`, deterministic deploys |
+
+Multicall3 and Permit2 are etched from their real mainnet bytecode (see
+`src/resources/presets/`); the CREATE2 deployer is deployed by Anvil itself.
+
+## Faucet
+
+The unified `faucet` command funds any address with the native coin and every
+bundled token, or a single token via `--token`:
+
+```sh
+# native coin + every bundled token, on all EVM chains
+wharfnet faucet evm 0xabc... 100
+
+# just one token, on a specific chain
+wharfnet faucet anvil-1 0xabc... 100 --token USDC
+```
+
+Amounts are whole units, scaled by each token's decimals. Funding is additive,
+so repeat top-ups accumulate.
+
+## Chain control
+
+Drive a running localnet with thin wrappers over Anvil's cheat RPCs, grouped
+under `wharfnet evm`. Each takes a `--chain` selector (`evm` for every EVM chain,
+or a name like `anvil-1`; defaults to `evm`):
+
+```sh
+wharfnet evm mine 10                 # mine 10 blocks
+wharfnet evm increase-time 86400     # fast-forward time by a day
+wharfnet evm warp 1893456000         # set the next block to an absolute Unix time
+wharfnet evm impersonate 0xd8dA…6045 # then: cast send … --from 0xd8dA…6045 --unlocked
+wharfnet evm impersonate 0xd8dA…6045 --stop
+wharfnet evm snapshot                # prints an id, e.g. 0x1
+wharfnet evm revert 0x1              # roll state back to that snapshot
+```
+
+`impersonate` sends transactions as **any** address with no private key, which is
+useful against forked state; `snapshot`/`revert` give tests a state reset point.
+These live under `evm` because they are Anvil-specific — other chain kinds have
+their own namespaces (`wharfnet starknet …`, `wharfnet solana …`).
+
+## Forking
+
+Point a chain at a live RPC and it boots as a **fork** of that network — real
+balances, contracts, and storage, mutable locally. Add `fork_url` (and optionally
+`fork_block` to pin a height) to a chain in `wharfnet.toml`:
+
+```toml filename="wharfnet.toml"
+[[chains]]
+name = "mainnet"
+port = 8545
+chain_id = 1
+fork_url = "${MAINNET_RPC}"   # ${VAR} is expanded from the environment
+fork_block = 21000000         # optional; omit to track the latest block
+```
+
+  `${VAR}` references are resolved from the environment on load, so an RPC key
+  never has to live in the file — and the manifest and `status` only ever record
+  a **redacted** `scheme://host`, never the key.
+
+Pinning `fork_block` to a past block needs an **archive** RPC; forking at the
+latest block works with an ordinary full-node endpoint. A forked chain mirrors
+live state, so it does **not** load the baked test tokens or canonical contracts —
+it already has whatever the source network has. Combine forking with chain
+control: `wharfnet evm impersonate` lets you send transactions as any address (a
+whale, a protocol admin) with no key.
+
+```sh
+MAINNET_RPC=https://… wharfnet up --config fork.toml --bare
+cast call 0xA0b8…eB48 'symbol()(string)' --rpc-url http://127.0.0.1:8545   # -> "USDC"
+```
+
+## Block explorer
+
+`wharfnet up` boots an [Otterscan](https://github.com/otterscan/otterscan)
+instance for each EVM chain by default — a lightweight, open-source block
+explorer. Anvil implements Otterscan's RPC API (`ots_*`), so the explorer needs
+no indexer or database — it is a static frontend that queries the chain directly.
+Each EVM chain has its own Otterscan on a dedicated port:
+
+| Chain   | RPC                     | Explorer                |
+| ------- | ----------------------- | ----------------------- |
+| anvil-1 | `http://127.0.0.1:8545` | `http://127.0.0.1:5100` |
+| anvil-2 | `http://127.0.0.1:8546` | `http://127.0.0.1:5101` |
+
+Pass `--bare` to skip the explorer containers and run only the chains.
+
+## Persistence
+
+EVM chains persist across `up --resume` / `up --reset` via Anvil's `--state`
+(one `session-<chain>.json` per chain under `.wharfnet/state/`). See
+[Resuming a session](/getting-started#resuming-a-session) for the shared model.
+
+---
+
+# Solana
+
+Source: https://sainathr19.github.io/wharfnet/chains/solana/
+
+`wharfnet up` boots a [`surfpool`](https://github.com/solana-foundation/surfpool)
+Solana chain by default (`solana-1` on `:8899`), alongside the EVM and Starknet
+chains. surfpool runs an in-memory SVM ("surfnet") that boots in about a second
+and serves the standard Solana JSON-RPC, so the usual tooling (`solana`, `anchor`)
+points straight at it.
+
+```sh
+wharfnet up --bare
+# standard Solana JSON-RPC on :8899, WebSocket RPC on :8900
+curl -s -X POST http://127.0.0.1:8899 \
+  -d '{"jsonrpc":"2.0","id":1,"method":"getHealth","params":[]}'   # -> {"result":"ok"}
+```
+
+  Writing Rust tests? Read the endpoints and accounts from a running localnet
+  with [`wharfnet::testkit`](/examples): `net.solana().rpc_url()`, `.ws_url()`,
+  `.token("USDC")`, and `.account(0)`. (Solana SPL tokens use the standard SPL
+  Token program, so `token_abi` is `None` — use `@solana/spl-token`.)
+
+Each Solana chain comes with **deterministic funded dev accounts** — three
+keypairs derived from documented seeds (`sha256("wharfnet-solana-dev-<i>")` →
+ed25519), so they're identical on every boot and regenerable by anyone (the
+Solana analogue of Anvil's fixed test mnemonic). They are well-known development
+keys, funded with 10,000 SOL each at boot and recorded in the manifest with their
+base58 secrets, so tooling can sign as them. Readiness is checked against
+surfpool's `getHealth` RPC.
+
+## WebSocket RPC
+
+The **WebSocket RPC** is published on the HTTP RPC port + 1 (`solana-1` →
+`ws://127.0.0.1:8900`), following Solana's own convention, so clients like
+`@solana/web3.js` that derive the WS URL from the RPC URL connect without extra
+configuration — subscriptions (`slotSubscribe`, `logsSubscribe`) and
+`confirmTransaction` all run against the host. It's always served (not gated by `--bare`) and recorded in the
+manifest.
+
+## Test tokens
+
+Every Solana chain also boots with standard **SPL test tokens** at fixed mint
+addresses (identical on every chain), each seeded onto the dev accounts:
+
+| Token | Decimals | Mint address                                  |
+| ----- | -------- | --------------------------------------------- |
+| USDC  | 6        | `94C6wFGeVr5SahK9owBMBhpFPRtvLuZhQQVRh7NYrEp9` |
+| WBTC  | 8        | `Fp7Dnb8KKkWWw5RfUPsQBNRrooj75gbNaWoC28AnCn3E` |
+
+Unlike the EVM/Starknet stacks — which bake a state file the node loads at boot —
+surfpool needs no program to deploy (the SPL Token program is native), so wharfnet
+seeds these at runtime the moment the chain is ready: it creates each mint with
+surfpool's `surfnet_setAccount` cheat and funds the dev accounts with
+`surfnet_setTokenAccount`. The mint addresses are deterministic (ed25519 of
+`sha256("wharfnet-solana-mint-<symbol>")`) and their mint authority is dev account 0.
+
+  Non-standard Token-2022 test tokens (transfer-fee, interest-bearing) are planned
+  but not yet available — surfpool's cheatcodes do not currently create queryable
+  Token-2022 accounts.
+
+## Faucet
+
+The unified `faucet` command works on Solana chains too:
+
+```sh
+# SOL + every SPL token, on every Solana chain
+wharfnet faucet solana 9WzD…AWWM 100
+
+# just one token, on a specific chain
+wharfnet faucet solana-1 9WzD…AWWM 50 --token WBTC
+
+# just native SOL
+wharfnet faucet solana-1 9WzD…AWWM 5 --token SOL
+```
+
+SOL is credited with the standard `requestAirdrop` RPC; the SPL tokens are topped
+up with surfpool's `surfnet_setTokenAccount` cheat (the recipient needs no key).
+Amounts are decimal (scaled by each token's decimals) or exact base units with
+`--raw`. Funding is additive, so repeat top-ups accumulate.
+
+## Chain control
+
+The Solana chain-control verbs live under `wharfnet solana`, wrapping surfpool's
+`surfnet_*` cheat JSON-RPC. Each takes a `--chain` selector (`solana` for every
+Solana chain, or a name like `solana-1`; defaults to `solana`):
+
+```sh
+wharfnet solana mine 10                # advance the chain by 10 slots
+wharfnet solana increase-time 86400    # fast-forward time by a day
+wharfnet solana warp 1893456000        # set the clock to an absolute Unix time
+wharfnet solana pause-clock            # freeze automatic slot production
+wharfnet solana resume-clock           # resume it
+```
+
+Differences from the EVM/Starknet verbs, all from surfpool's design: `mine`
+advances **slots** (Solana's block cadence) rather than mining discrete blocks;
+`warp` is **forward-only** (surfpool can't rewind, so a past target is refused);
+there's **no `impersonate` or `snapshot`/`revert`** (set account state directly
+via cheatcodes instead); and `pause-clock`/`resume-clock` are surfpool extras —
+surfpool auto-produces slots on a timer, so pausing gives you deterministic,
+step-by-step control (`mine` while paused advances exactly N slots).
+
+## Forking
+
+Set `fork_url` on a `kind = "solana"` chain and surfpool boots as a
+**copy-on-read** fork of that network, fetching accounts from the source RPC on
+first access. The predeployed dev accounts are still airdropped over the fork, so
+you have funded signers immediately:
+
+```toml filename="wharfnet.toml"
+[[chains]]
+name = "sol-fork"
+kind = "solana"
+port = 8899
+fork_url = "${SOLANA_RPC}"   # a Solana JSON-RPC endpoint (e.g. mainnet-beta)
+```
+
+  One difference from the EVM/Starknet forks: **`fork_block` is not supported for
+  Solana** — surfpool has no fork-at-slot flag, so a Solana fork always tracks the
+  datasource's current slot. Setting `fork_block` on a `kind = "solana"` chain is
+  rejected on load.
+
+## Block explorer
+
+Each Solana chain serves surfpool's built-in **Studio** explorer. Unlike the
+Starknet UI — served at `/ui` on the RPC port — surfpool runs Studio as a
+separate in-container service, so wharfnet publishes it on the chain's RPC port
+**+ 10000** and records the URL in the manifest:
+
+| Chain    | RPC                     | Explorer                 |
+| -------- | ----------------------- | ------------------------ |
+| solana-1 | `http://127.0.0.1:8899` | `http://127.0.0.1:18899` |
+
+Pass `--bare` to skip it.
+
+## Persistence
+
+Solana chains persist across `up --resume` / `up --reset` like the EVM/Starknet
+chains: surfpool writes a surfnet SQLite db (`session-<chain>.sqlite`) via `--db`
+under `.wharfnet/state/`, reloaded on the next `--resume`. See
+[Resuming a session](/getting-started#resuming-a-session) for the shared model.
+
+---
+
+# Starknet
+
+Source: https://sainathr19.github.io/wharfnet/chains/starknet/
+
+`wharfnet up` boots a
+[`starknet-devnet`](https://github.com/0xSpaceShard/starknet-devnet) chain by
+default (`starknet-1` on `:5050`), right next to the two EVM chains — one command,
+one manifest, one `status`. To run without it, write a `wharfnet.toml` that omits
+the Starknet chain (a config replaces the defaults).
+
+```sh
+wharfnet up --bare
+curl http://127.0.0.1:5050/is_alive                                   # -> Alive!!!
+curl -s -X POST http://127.0.0.1:5050/rpc \
+  -d '{"jsonrpc":"2.0","id":1,"method":"starknet_chainId","params":[]}'  # -> SN_SEPOLIA
+```
+
+  Writing Rust tests? Don't hard-code the addresses below — read them from a
+  running localnet with [`wharfnet::testkit`](/examples):
+  `net.starknet().rpc_url()`, `.token("USDC")`, `.account(0)`, and
+  `.token_abi("USDC")` (the Cairo ABI).
+
+Each Starknet chain comes with **deterministic predeployed accounts** (fixed
+`--seed`, so they're identical every boot) and the standard **ETH and STRK fee
+tokens** at their canonical addresses — all recorded in the manifest. The RPC is
+served at `http://127.0.0.1:<port>/rpc`, and readiness is checked against
+devnet's `/is_alive` endpoint.
+
+## Test tokens
+
+Every Starknet chain also boots with a set of **Cairo test tokens** pre-deployed
+at fixed addresses (identical on every chain), each with a **public
+`mint(recipient, amount)`** and seeded onto the dev accounts. As on the EVM side,
+the first two are standard and the rest are deliberately **non-standard** for
+token-integration testing:
+
+| Token | Decimals | Address | Behaviour |
+| ----- | -------- | ------- | --------- |
+| USDC  | 6  | `0x040b582f9ba878be8e78a6ddc665dfdfd55a4deae9ceeb40115abcfa1f8df686` | standard |
+| WBTC  | 8  | `0x029a79ea0c5716d63250a0bbf2462509f3c0eed9d29a2e1c02c63fa7b2b1db66` | standard |
+| FEE   | 18 | `0x07edc0e8738c7804ad087344c1c54d817f739dd4179f1dd4e11ea5badada47aa` | fee-on-transfer (1% burned on `transfer`) |
+| REB   | 18 | `0x06e94ed66ea18ea06a9bed118a8d6ebc3cc19d31ed025bd5abadd3477d300500` | rebasing (`rebase(factor)` rescales balances) |
+
+Sources live in `src/resources/contracts/starknet/` (self-contained Cairo, no
+OpenZeppelin dependency). The EVM stack's USDT-style no-return token has no
+analogue — Cairo's ERC-20 ABI returns `bool` by the standard. Under the hood the
+tokens are baked into a devnet **replay log** that `wharfnet up` re-executes on
+boot; regenerate it after editing the sources with
+`./scripts/gen-starknet-token-state.sh` (needs `scarb` + `cargo` — the
+declare/deploy step runs through `examples/gen_starknet_tokens.rs`, using the same
+JSON-RPC-0.10 [`starknet-rust`](https://github.com/software-mansion/starknet-rust)
+client the faucet does).
+
+## Faucet
+
+The unified `faucet` command works on Starknet chains too:
+
+```sh
+# ETH + STRK + every Cairo test token, on every Starknet chain
+wharfnet faucet starknet 0x05a1... 100
+
+# just one token, on a specific chain
+wharfnet faucet starknet-1 0x05a1... 50 --token WBTC
+```
+
+ETH and STRK are minted through devnet's mint cheat; the Cairo test tokens are
+minted by a **signed invoke** of their public `mint`, submitted through the first
+predeployed dev account (it only pays gas — the recipient needs no key). Amounts
+are whole units, scaled by each token's decimals. Funding is additive, so repeat
+top-ups accumulate.
+
+## Chain control
+
+The Starknet chain-control verbs live under `wharfnet starknet`, wrapping
+starknet-devnet's cheat JSON-RPC. Each takes a `--chain` selector (`starknet` for
+every Starknet chain, or a name like `starknet-1`; defaults to `starknet`):
+
+```sh
+wharfnet starknet mine 10                # create 10 blocks
+wharfnet starknet increase-time 86400    # fast-forward time by a day
+wharfnet starknet warp 1893456000        # set the chain to an absolute Unix time
+wharfnet starknet impersonate 0x0123…    # forked chains only (see below)
+wharfnet starknet impersonate 0x0123… --stop
+```
+
+  Two differences from the EVM verbs, both from starknet-devnet: there's **no
+  `snapshot`/`revert`** (devnet has no numbered-snapshot mechanism, only block
+  abort), and **`impersonate` works only on a forked chain** — devnet impersonates
+  accounts that exist on the forked origin, so on a plain local chain the command
+  is refused with a hint to set `fork_url` first.
+
+## Forking
+
+Set `fork_url` (and optionally `fork_block`) on a `kind = "starknet"` chain and
+it boots as a fork via starknet-devnet's `--fork-network`, mirroring the origin's
+contracts and balances. The same `${VAR}` expansion and redaction as the EVM side
+apply — the key never lands in the file or the manifest:
+
+```toml filename="wharfnet.toml"
+[[chains]]
+name = "sn-fork"
+kind = "starknet"
+port = 5050
+fork_url = "${STARKNET_RPC}"   # a Starknet JSON-RPC endpoint (e.g. Sepolia)
+fork_block = 900000            # optional; omit to track the latest block
+```
+
+The predeployed dev accounts still apply (devnet funds them over the fork), so
+you can send transactions against real forked state right away.
+
+## Block explorer
+
+Each Starknet chain boots with starknet-devnet's built-in web UI explorer,
+served **in-process** at `/ui` on the chain's own RPC port (Otterscan is
+EVM-only) — no extra container:
+
+| Chain      | RPC                         | Explorer                   |
+| ---------- | --------------------------- | -------------------------- |
+| starknet-1 | `http://127.0.0.1:5050/rpc` | `http://127.0.0.1:5050/ui` |
+
+The URL is recorded in the manifest and printed by `status`. Pass `--bare` to
+skip it.
+
+## Persistence
+
+Starknet chains persist across `up --resume` / `up --reset` like the EVM chains:
+devnet dumps its replay log on every block (one entry per transaction) under
+`.wharfnet/state/`, replayed on the next `--resume`. See
+[Resuming a session](/getting-started#resuming-a-session) for the shared model.
+
+---
+
+# Bitcoin
+
+Source: https://sainathr19.github.io/wharfnet/chains/bitcoin/
+
+`wharfnet up` boots a [`bitcoind`](https://github.com/bitcoin/bitcoin) chain by
+default (`bitcoin-1` on `:18443`), alongside the EVM, Starknet, and Solana chains
+— one command, one manifest, one `status`. It runs Bitcoin Core 29 (the official
+`bitcoin/bitcoin:29` image) in **regtest**: a standalone network where blocks are
+produced on demand rather than on a fixed schedule, so the chain is instant and
+fully deterministic. To run without it, write a `wharfnet.toml` that omits the
+Bitcoin chain (a config replaces the defaults).
+
+```sh
+wharfnet up --bare
+# JSON-RPC on :18443 — bitcoind always requires auth; the dev creds are wharfnet:wharfnet
+curl -s --user wharfnet:wharfnet -X POST http://127.0.0.1:18443 \
+  -d '{"jsonrpc":"1.0","id":1,"method":"getblockchaininfo","params":[]}'  # -> {"chain":"regtest",...}
+```
+
+  Writing Rust tests? Read the endpoints and the funded account from a running
+  localnet with [`wharfnet::testkit`](/examples). UTXO chains have no per-kind
+  accessor, so select by name: `net.chain("bitcoin-1")?.rpc_url()` (the URL
+  already embeds the dev creds) and `.account(0)` (the boot wallet address). There
+  are no test tokens, so `token`/`token_abi` don't apply — spend over RPC with a
+  Bitcoin client such as `bitcoinjs-lib` or `bitcoincore-rpc`.
+
+The RPC is served at `http://wharfnet:wharfnet@127.0.0.1:18443` — bitcoind answers
+even `getblockchaininfo` only with credentials, so the dev user/password
+(`wharfnet:wharfnet`) are baked into the daemon flags and embedded in the manifest
+URL. Readiness is checked against an authed `getblockchaininfo`.
+
+## Funded boot wallet
+
+Regtest starts with an empty chain and no spendable coins, so on first boot
+wharfnet creates a node wallet named `wharfnet` and mines **101 blocks** to a
+fresh address in it. Coinbase maturity in regtest is 100 blocks, so 101 blocks
+leaves exactly one mature coinbase — **50 BTC** — spendable immediately. That
+address and balance are recorded in the manifest as the chain's funded account
+(the UTXO analogue of Anvil's pre-funded keys).
+
+  The key never leaves the node. Regtest descriptor wallets don't export private
+  keys, so the manifest records the account as *"(spendable via node wallet
+  'wharfnet')"* rather than a raw secret — the faucet and chain control spend
+  through the node's own wallet.
+
+## Test tokens
+
+Bitcoin has **no test tokens** — the UTXO model has no smart-contract token
+standard, so wharfnet funds only the native coin (**BTC**). There are no baked
+token addresses, infra contracts, or ABIs to load; the chain boots with just the
+funded coinbase described above.
+
+## Faucet
+
+The unified `faucet` command works on Bitcoin chains too:
+
+```sh
+# native BTC, on every Bitcoin chain
+wharfnet faucet bitcoin bcrt1q…xyz 5
+
+# a specific chain, native coin named explicitly
+wharfnet faucet bitcoin-1 bcrt1q…xyz 2.5 --token BTC
+
+# exact base units (satoshis) instead of decimal coins
+wharfnet faucet bitcoin-1 bcrt1q…xyz 150000000 --raw
+```
+
+Funding runs `sendtoaddress` from the boot wallet, then mines one block to
+confirm the payment. Amounts are decimal coins (8 decimals) or exact satoshis
+with `--raw`. `--token` may be `BTC` or omitted — there are no other tokens, so
+any other value errors. Funding is additive: each top-up adds another confirmed
+UTXO to the address.
+
+## Chain control
+
+Regtest produces blocks only on demand, so **`mine` is the whole control
+surface** — there's no time-travel, snapshot/revert, or impersonation (those are
+EVM/Starknet features that bitcoind has no equivalent for). The verb lives under
+`wharfnet bitcoin` and takes a `--chain` selector (`bitcoin` for every Bitcoin
+chain, or a name like `bitcoin-1`; defaults to `bitcoin`):
+
+```sh
+wharfnet bitcoin mine 6      # mine 6 blocks to the boot wallet, e.g. to confirm txs
+```
+
+`mine` calls `generatetoaddress` against the boot wallet, so the block rewards
+accrue to the funded account, advancing confirmations and maturing additional
+coinbase to spend.
+
+## Forking
+
+**Forking is not supported for UTXO chains.** bitcoind regtest has no
+fork-a-live-network mode, so setting `fork_url` (or `fork_block`) on a
+`kind = "bitcoin"` chain is rejected on load. Use a fresh regtest chain and fund
+what you need with the faucet.
+
+## Block explorer
+
+Each Bitcoin chain serves a bundled
+[**btc-rpc-explorer**](https://github.com/janoside/btc-rpc-explorer) (pinned
+`getumbrel/btc-rpc-explorer:v3.4.0`) — the UTXO analogue of Otterscan. Unlike
+Otterscan, it makes its RPC calls **server-side**, so it reaches bitcoind over the
+docker network via the chain's service name and internal RPC port (no browser-side
+CORS). wharfnet publishes its UI on a host port assigned from `5100` upward, so in
+the default topology it lands on `:5102`; the exact URL is recorded in the
+manifest and printed by `status`:
+
+| Chain     | RPC                     | Explorer                 |
+| --------- | ----------------------- | ------------------------ |
+| bitcoin-1 | `http://127.0.0.1:18443` | `http://127.0.0.1:5102` |
+
+Pass `--bare` to skip it.
+
+## Persistence
+
+Bitcoin chains persist across `up --resume` / `up --reset` like the other chains.
+The **entire bitcoind datadir is the session** — wallet, chainstate, and blocks —
+mounted per chain under `.wharfnet/state/`. `--resume` keeps it (boot is
+idempotent: it loads the existing wallet instead of recreating it and mines only
+the shortfall back to 101 blocks), and `--reset` wipes it for a clean chain. See
+[Resuming a session](/getting-started#resuming-a-session) for the shared model.
+
+---
+
+# Litecoin
+
+Source: https://sainathr19.github.io/wharfnet/chains/litecoin/
+
+`wharfnet up` boots a [`litecoind`](https://github.com/litecoin-project/litecoin)
+chain by default (`litecoin-1` on `:19443`), alongside the EVM, Starknet, Solana,
+and Bitcoin chains — one command, one manifest, one `status`. It runs Litecoin
+Core v0.21 (the `uphold/litecoin-core:0.21` image) in **regtest**: a standalone
+network where blocks are produced on demand rather than on a fixed schedule, so
+the chain is instant and fully deterministic. To run without it, write a
+`wharfnet.toml` that omits the Litecoin chain (a config replaces the defaults).
+
+Litecoin Core is a Bitcoin Core 0.21 fork, so the JSON-RPC surface wharfnet drives
+is identical to Bitcoin's — everything below is the same workflow, on `LTC` and
+Litecoin's ports.
+
+```sh
+wharfnet up --bare
+# JSON-RPC on :19443 — litecoind always requires auth; the dev creds are wharfnet:wharfnet
+curl -s --user wharfnet:wharfnet -X POST http://127.0.0.1:19443 \
+  -d '{"jsonrpc":"1.0","id":1,"method":"getblockchaininfo","params":[]}'  # -> {"chain":"regtest",...}
+```
+
+  Writing Rust tests? Read the endpoints and the funded account from a running
+  localnet with [`wharfnet::testkit`](/examples). UTXO chains have no per-kind
+  accessor, so select by name: `net.chain("litecoin-1")?.rpc_url()` (the URL
+  already embeds the dev creds) and `.account(0)` (the boot wallet address). There
+  are no test tokens, so `token`/`token_abi` don't apply — spend over RPC with any
+  Bitcoin-compatible client pointed at the Litecoin node.
+
+The RPC is served at `http://wharfnet:wharfnet@127.0.0.1:19443` — litecoind answers
+even `getblockchaininfo` only with credentials, so the dev user/password
+(`wharfnet:wharfnet`) are baked into the daemon flags and embedded in the manifest
+URL. Readiness is checked against an authed `getblockchaininfo`.
+
+## Funded boot wallet
+
+Regtest starts with an empty chain and no spendable coins, so on first boot
+wharfnet creates a node wallet named `wharfnet` and mines **101 blocks** to a
+fresh address in it. Coinbase maturity in regtest is 100 blocks, so 101 blocks
+leaves exactly one mature coinbase — **50 LTC** — spendable immediately. That
+address and balance are recorded in the manifest as the chain's funded account
+(the UTXO analogue of Anvil's pre-funded keys).
+
+  The key never leaves the node. Regtest descriptor wallets don't export private
+  keys, so the manifest records the account as *"(spendable via node wallet
+  'wharfnet')"* rather than a raw secret — the faucet and chain control spend
+  through the node's own wallet.
+
+## Test tokens
+
+Litecoin has **no test tokens** — the UTXO model has no smart-contract token
+standard, so wharfnet funds only the native coin (**LTC**). There are no baked
+token addresses, infra contracts, or ABIs to load; the chain boots with just the
+funded coinbase described above.
+
+## Faucet
+
+The unified `faucet` command works on Litecoin chains too:
+
+```sh
+# native LTC, on every Litecoin chain
+wharfnet faucet litecoin rltc1q…xyz 5
+
+# a specific chain, native coin named explicitly
+wharfnet faucet litecoin-1 rltc1q…xyz 2.5 --token LTC
+
+# exact base units (litoshis) instead of decimal coins
+wharfnet faucet litecoin-1 rltc1q…xyz 150000000 --raw
+```
+
+Funding runs `sendtoaddress` from the boot wallet, then mines one block to
+confirm the payment. Amounts are decimal coins (8 decimals) or exact base units
+with `--raw`. `--token` may be `LTC` or omitted — there are no other tokens, so
+any other value errors. Funding is additive: each top-up adds another confirmed
+UTXO to the address.
+
+## Chain control
+
+Regtest produces blocks only on demand, so **`mine` is the whole control
+surface** — there's no time-travel, snapshot/revert, or impersonation (those are
+EVM/Starknet features that litecoind has no equivalent for). The verb lives under
+`wharfnet litecoin` and takes a `--chain` selector (`litecoin` for every Litecoin
+chain, or a name like `litecoin-1`; defaults to `litecoin`):
+
+```sh
+wharfnet litecoin mine 6      # mine 6 blocks to the boot wallet, e.g. to confirm txs
+```
+
+`mine` calls `generatetoaddress` against the boot wallet, so the block rewards
+accrue to the funded account, advancing confirmations and maturing additional
+coinbase to spend.
+
+## Forking
+
+**Forking is not supported for UTXO chains.** litecoind regtest has no
+fork-a-live-network mode, so setting `fork_url` (or `fork_block`) on a
+`kind = "litecoin"` chain is rejected on load. Use a fresh regtest chain and fund
+what you need with the faucet.
+
+## Block explorer
+
+Each Litecoin chain serves a bundled
+[**ltc-rpc-explorer**](https://hub.docker.com/r/techtoshi/ltc-rpc-explorer) — a
+maintained Litecoin fork of the btc-rpc-explorer that backs the Bitcoin chain
+(the upstream image is Bitcoin-only), giving BTC/LTC explorer parity. Like its
+Bitcoin counterpart it makes its RPC calls **server-side**, reaching litecoind
+over the docker network via the chain's service name and internal RPC port.
+wharfnet publishes its UI on a host port assigned from `5100` upward, so in the
+default topology it lands on `:5103`; the exact URL is recorded in the manifest
+and printed by `status`:
+
+| Chain      | RPC                      | Explorer                 |
+| ---------- | ------------------------ | ------------------------ |
+| litecoin-1 | `http://127.0.0.1:19443` | `http://127.0.0.1:5103` |
+
+Pass `--bare` to skip it.
+
+  The `techtoshi/ltc-rpc-explorer` image is published for **amd64 only** (and
+  pinned by digest, since it only carries a rolling `latest` tag). wharfnet runs
+  it under `linux/amd64`, so on Apple Silicon and other arm64 hosts it runs
+  emulated — it works, but boots slower. Use `--bare` to skip it if you don't
+  need the UI.
+
+## Persistence
+
+Litecoin chains persist across `up --resume` / `up --reset` like the other chains.
+The **entire litecoind datadir is the session** — wallet, chainstate, and blocks —
+mounted per chain under `.wharfnet/state/`. `--resume` keeps it (boot is
+idempotent: it loads the existing wallet instead of recreating it and mines only
+the shortfall back to 101 blocks), and `--reset` wipes it for a clean chain. See
+[Resuming a session](/getting-started#resuming-a-session) for the shared model.
+
+---
+
+# zkSync
+
+Source: https://sainathr19.github.io/wharfnet/chains/zksync/
+
+`wharfnet up` boots an
+[`anvil-zksync`](https://github.com/matter-labs/anvil-zksync) chain by default
+(`zksync-1` on `:8011`), alongside the EVM, Starknet, Solana, and Bitcoin/Litecoin
+chains — one command, one manifest, one `status`. anvil-zksync is Matter Labs'
+in-memory zkSync node (the EraVM analogue of Anvil): it boots in about a second
+and serves an Anvil-compatible JSON-RPC, so the usual Ethereum tooling points
+straight at it. To run without it, write a `wharfnet.toml` that omits the zkSync
+chain (a config replaces the defaults).
+
+```sh
+wharfnet up --bare
+# Anvil-compatible JSON-RPC on :8011
+curl -s -X POST http://127.0.0.1:8011 \
+  -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}'   # -> {"result":"0x104"}
+```
+
+  Writing Rust tests? Read the endpoints and the funded account from a running
+  localnet with [`wharfnet::testkit`](/examples). zkSync has no per-kind accessor,
+  so select by name: `net.chain("zksync-1")?.rpc_url()` and `.account(0)` (a
+  funded dev account with its private key). There are no test tokens yet, so
+  `token`/`token_abi` don't apply.
+
+Each zkSync chain comes with **deterministic funded dev accounts** — anvil-zksync
+funds the standard Anvil test-mnemonic accounts (mnemonic `"test test test test
+test test test test test test test junk"`), so they're identical to the EVM
+chains' accounts and to well-known Ethereum tooling defaults. They're funded with
+10,000 ETH each at boot and recorded in the manifest with their private keys.
+Readiness is checked against anvil-zksync's `eth_chainId` RPC, and the default
+chain id is **260**.
+
+## Test tokens
+
+zkSync has **no bundled test tokens yet** — the chain boots with just the funded
+native-coin (**ETH**) accounts above. zkSync contracts compile to EraVM bytecode
+(not EVM bytecode), so the EVM stack's baked token snapshot doesn't carry over;
+EraVM test tokens are **planned**. In the meantime, fund ETH with the faucet and
+deploy your own tokens with a zkSync-aware toolchain (e.g. `foundry-zksync` or
+`zksync-ethers`).
+
+## Faucet
+
+The unified `faucet` command works on zkSync chains too:
+
+```sh
+# native ETH, on every zkSync chain
+wharfnet faucet zksync 0xabc… 100
+
+# a specific chain, native coin named explicitly
+wharfnet faucet zksync-1 0xabc… 2.5 --token ETH
+
+# exact base units (wei) instead of decimal coins
+wharfnet faucet zksync-1 0xabc… 1000000000000000000 --raw
+```
+
+Funding tops up native ETH additively through anvil-zksync's `anvil_setBalance`
+cheat (read the current balance, add, set), so an existing balance is never
+clobbered and no dev account is drained. Amounts are decimal coins (18 decimals)
+or exact base units (wei) with `--raw`. `--token` may be `ETH` or omitted — there
+are no other tokens yet, so any other value errors.
+
+## Chain control
+
+anvil-zksync implements the same `evm_*`/`anvil_*` cheat RPCs as Anvil, so the
+zkSync chain-control verbs mirror the `wharfnet evm` set **one-for-one** —
+including `snapshot`/`revert`, which the Starknet and Solana engines have no
+analogue for. They live under `wharfnet zksync` and each takes a `--chain`
+selector (`zksync` for every zkSync chain, or a name like `zksync-1`; defaults to
+`zksync`):
+
+```sh
+wharfnet zksync mine 10                # mine 10 blocks
+wharfnet zksync increase-time 86400    # fast-forward time by a day (mines a block)
+wharfnet zksync warp 1893456000        # set the next block to an absolute Unix time
+wharfnet zksync impersonate 0x0123…    # send txs as any account, no key needed
+wharfnet zksync impersonate 0x0123… --stop
+wharfnet zksync snapshot               # prints an id you can revert to
+wharfnet zksync revert 0x1             # roll state back to a snapshot id
+```
+
+The image ships only the node binary (no `cast`), so these talk to the chain's
+published RPC directly rather than shelling into the container.
+
+## Forking
+
+Set `fork_url` (and optionally `fork_block`) on a `kind = "zksync"` chain and it
+boots as a fork via anvil-zksync's `fork` subcommand, mirroring the origin's
+state. The same `${VAR}` expansion and redaction as the EVM side apply — the key
+never lands in the file or the manifest:
+
+```toml filename="wharfnet.toml"
+[[chains]]
+name = "zk-fork"
+kind = "zksync"
+port = 8011
+fork_url = "${ZKSYNC_RPC}"   # a zkSync JSON-RPC endpoint (e.g. Era mainnet/Sepolia)
+fork_block = 12345678        # optional; omit to track the latest block
+```
+
+anvil-zksync funds the dev accounts over the fork, so you have funded signers to
+send transactions against real forked state right away.
+
+## Block explorer
+
+  A bundled zkSync explorer is **planned (TODO)**, not yet shipped. Otterscan —
+  which backs the EVM chains — speaks EVM bytecode, not EraVM, so it can't be
+  pointed at anvil-zksync; a zkSync-native explorer is the intended path to
+  explorer parity.
+
+Until then zkSync ships **no bundled explorer**: wharfnet advertises no explorer
+URL for `kind = "zksync"` chains (the manifest omits the field, and `status`
+shows none). The RPC is fully functional in the meantime — inspect the chain over
+JSON-RPC (`eth_getBlockByNumber`, `eth_getTransactionReceipt`, …).
+
+## Persistence
+
+  zkSync chains are **ephemeral for now** — persistence is planned (TODO). Unlike
+  the other chains, a zkSync chain does **not** save its state across restarts:
+  `wharfnet up --resume` boots it fresh (the rest of the topology still resumes
+  normally). anvil-zksync's `--state` errors when the snapshot file is missing
+  (it has no load-if-present mode) and doesn't dump on container stop, so it can't
+  yet back wharfnet's seedless resume flow.
+
+Every boot starts from the funded dev accounts described above. See
+[Resuming a session](/getting-started#resuming-a-session) for how the other
+chains persist.
+
+---
+
+# CLI Reference
+
+Source: https://sainathr19.github.io/wharfnet/reference/cli/
+
+Every `wharfnet` command, flag, and default. The binary is `wharfnet`; run
+`wharfnet <command> --help` for the same information at the terminal.
+
+  Commands that boot or drive a chain shell out to `docker compose`, so they need
+  a running Docker daemon. Only `compose` and `status` work without one.
+
+## Command summary
+
+| Command | Purpose |
+| --- | --- |
+| [`up`](#up) | Boot the localnet (all chains, or a selection). |
+| [`down`](#down) | Tear the localnet down and remove its containers. |
+| [`status`](#status) | Show running chains and endpoints (`--json` for machines). |
+| [`logs`](#logs) | Stream container logs. |
+| [`compose`](#compose) | Print the generated `docker-compose.yml` without booting. |
+| [`faucet`](#faucet) | Fund an address with native coin and/or test tokens. |
+| [`evm`](#chain-control) / [`starknet`](#chain-control) / [`solana`](#chain-control) / [`bitcoin`](#chain-control) / [`litecoin`](#chain-control) / [`zksync`](#chain-control) | Per-chain control (mine, warp, impersonate, snapshot…). |
+
+## `up`
+
+Boot the local multi-chain network. By default every boot starts fresh from the
+pre-deployed tokens and seeded accounts, and boots **every** chain in the topology
+with its bundled block explorer.
+
+```sh
+wharfnet up [CHAIN...] [--resume | --reset] [--bare] [-x CHAIN] [-c PATH]
+```
+
+| Argument / flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `[CHAIN...]` | positional, repeatable | all chains | Chains to boot — a kind (`evm`) or a name (`anvil-1`). Omit to boot the whole topology. |
+| `--resume` | flag | off | Restore the previous session if a saved snapshot exists, and keep saving. Mutually exclusive with `--reset`. |
+| `--reset` | flag | off | Discard any saved session snapshot and boot clean. |
+| `--bare` | flag | off | Boot only the chains — skip the bundled block explorers. |
+| `-x`, `--exclude <CHAIN>` | repeatable / comma-separated | none | Chains to skip (kind or name), applied after the selection. |
+| `-c`, `--config <PATH>` | path | `./wharfnet.toml` | Config file (see [`$WHARFNET_CONFIG`](#environment-variables)). |
+
+```sh
+wharfnet up                      # everything, fresh
+wharfnet up evm solana           # only those kinds
+wharfnet up -x bitcoin,litecoin  # everything except these
+wharfnet up --resume             # restore the last session
+```
+
+## `down`
+
+Tear down the local network and clean up its containers and compose project.
+Takes no arguments.
+
+```sh
+wharfnet down
+```
+
+## `status`
+
+Show the status and endpoints of running chains, read from the manifest.
+
+```sh
+wharfnet status [--json]
+```
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--json` | off | Emit a stable JSON document instead of the formatted report. See the [manifest reference](/reference/manifest#status---json). |
+
+With `--json`, the output is always valid JSON even when nothing is running
+(`{"running": false, "project": null, "chains": []}`), so scripts can branch on
+`running` without special-casing.
+
+## `logs`
+
+Stream container logs, optionally for a single chain or kind.
+
+```sh
+wharfnet logs [CHAIN] [-f]
+```
+
+| Argument / flag | Default | Description |
+| --- | --- | --- |
+| `[CHAIN]` | all services | A chain kind (`evm`) or name (`anvil-1`). |
+| `-f`, `--follow` | off | Keep streaming new output, like `tail -f`. |
+
+## `compose`
+
+Print the generated `docker-compose.yml` to stdout without booting anything —
+useful for inspection or debugging. Works without Docker.
+
+```sh
+wharfnet compose [CHAIN...] [--bare] [-x CHAIN] [-c PATH]
+```
+
+Flags mirror [`up`](#up): `[CHAIN...]`, `--bare`, `-x/--exclude`, `-c/--config`.
+
+## `faucet`
+
+Fund an address from the built-in faucet. Funding is **additive** — token
+top-ups read the current balance first.
+
+```sh
+wharfnet faucet <CHAIN> <ADDRESS> [AMOUNT] [--token SYMBOL] [--raw]
+```
+
+| Argument / flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `<CHAIN>` | positional (required) | — | Target — a kind (`evm`) funds every matching chain, or a name (`anvil-1`). |
+| `<ADDRESS>` | positional (required) | — | Recipient address. |
+| `[AMOUNT]` | positional | `100` | Decimal whole units (e.g. `1.5`), scaled by the token's decimals — or an exact base-unit integer with `--raw`. |
+| `--token <SYMBOL>` | string | none | Fund only this token (e.g. `USDC`). Omit to fund the native coin **and** every bundled token. |
+| `--raw` | flag | off | Treat `AMOUNT` as raw base units (wei / fri / a token's smallest unit). |
+
+```sh
+wharfnet faucet evm 0xabc... 100            # native + all tokens, every EVM chain
+wharfnet faucet anvil-1 0xabc... 50 --token USDC
+wharfnet faucet solana 9WzD…AWWM 5 --token USDC
+```
+
+## Chain control
+
+Per-chain cheat commands are grouped under a namespace per kind, because the
+verb set differs by engine. Each command targets chains with `--chain <KIND|NAME>`,
+defaulting to the namespace's own kind (so `wharfnet evm mine` hits every EVM
+chain). Bitcoin/Litecoin use `--chain` too but default to their own kind.
+
+### Verb support by chain
+
+| Verb | EVM | zkSync | Starknet | Solana | Bitcoin / Litecoin |
+| --- | :-: | :-: | :-: | :-: | :-: |
+| `mine <count>` | ✅ blocks | ✅ blocks | ✅ blocks | ✅ slots | ✅ blocks |
+| `increase-time <seconds>` | ✅ | ✅ | ✅ | ✅ | — |
+| `warp <timestamp>` | ✅ | ✅ | ✅ | ✅ forward-only | — |
+| `impersonate <addr> [--stop]` | ✅ | ✅ | ✅ *(fork only)* | — | — |
+| `snapshot` / `revert <id>` | ✅ | ✅ | — | — | — |
+| `pause-clock` / `resume-clock` | — | — | — | ✅ | — |
+
+Notes:
+- **Solana** `mine` advances *slots*; `warp` is forward-only (surfpool cannot rewind); `pause-clock`/`resume-clock` freeze and restart automatic slot production.
+- **Starknet** `impersonate` requires a forked chain (devnet only impersonates in forking mode); there is no snapshot/revert.
+- **Bitcoin/Litecoin** run regtest, which only mines on demand — `mine` is the whole surface.
+
+### Common forms
+
+```sh
+wharfnet evm mine 10 --chain anvil-2
+wharfnet evm increase-time 3600 --chain anvil-1
+wharfnet evm warp 4102444800 --chain anvil-1     # absolute Unix timestamp
+wharfnet evm impersonate 0xabc... --chain anvil-1
+wharfnet evm impersonate 0xabc... --stop --chain anvil-1
+wharfnet evm snapshot --chain anvil-1            # prints an id, e.g. 0x1
+wharfnet evm revert 0x1 --chain anvil-1
+
+wharfnet zksync mine 5 --chain zksync-1          # same verb set as evm
+
+wharfnet starknet mine --chain starknet-1
+wharfnet starknet warp 4102444800 --chain starknet-1
+
+wharfnet solana mine 2 --chain solana-1          # advances 2 slots
+wharfnet solana pause-clock --chain solana-1
+
+wharfnet bitcoin mine 6                           # defaults to --chain bitcoin
+wharfnet litecoin mine 6
+```
+
+## Environment variables
+
+| Variable | Used by | Effect |
+| --- | --- | --- |
+| `WHARFNET_CONFIG` | `up`, `compose` | Path to the config file, below an explicit `-c/--config` flag and above `./wharfnet.toml`. A path from here **must** exist. |
+| `WHARFNET_CHAINS` | `up`, `compose` | Default chain selection when no positional `[CHAIN...]` is given, e.g. `WHARFNET_CHAINS=evm,solana`. Comma-separated kinds or names. |
+
+## Exit status
+
+Commands exit `0` on success and print `error: <message>` to stderr with a
+non-zero exit on failure (e.g. Docker unavailable, no config match, a chain that
+fails to become ready).
+
+---
+
+# Config Reference (wharfnet.toml)
+
+Source: https://sainathr19.github.io/wharfnet/reference/config/
+
+wharfnet is **zero-config**: with no `wharfnet.toml` it boots the [default
+topology](#default-topology). A config file customizes the chain topology — which
+chains to boot and their ports, chain IDs, block times, and fork settings.
+
+  A config **replaces** the defaults entirely. If you write a `wharfnet.toml`,
+  list every chain you want — the built-in chains are not merged in.
+
+## Resolution order
+
+The config path is resolved as: an explicit `-c/--config` flag → the
+`WHARFNET_CONFIG` env var → `./wharfnet.toml`. A path from the flag or env var
+**must** exist (a missing one is a loud error); the default `./wharfnet.toml` is
+optional (absent → built-in defaults).
+
+## Schema
+
+The file has one top-level key, `chains`, an array of chain tables. Unknown
+fields are rejected.
+
+```toml
+[[chains]]
+name = "anvil-1"       # required
+kind = "evm"           # default: "evm"
+port = 8545            # required
+chain_id = 31337       # int or string; required for evm/zksync-if-set
+block_time = 1         # default: 1 (seconds); EVM/zkSync only
+# fork_url = "..."     # optional
+# fork_block = 0       # optional; requires fork_url
+```
+
+### Fields
+
+| Field | Type | Required | Default | Notes |
+| --- | --- | --- | --- | --- |
+| `name` | string | ✅ | — | Becomes the container/service name. Letters, digits, `.`, `_`, `-` only. Must be unique. |
+| `kind` | string | — | `"evm"` | One of `evm`, `starknet`, `solana`, `bitcoin`, `litecoin`, `zksync`. |
+| `port` | integer | ✅ | — | Published host port for the RPC. Must be unique across chains. |
+| `chain_id` | integer **or** string | see [per-kind](#per-kind-rules) | — | Accepts a TOML integer (`31337`) or string (`"SN_SEPOLIA"`). Must be unique. |
+| `block_time` | integer | — | `1` | Auto-mining interval in seconds. EVM/zkSync only; ignored elsewhere. |
+| `fork_url` | string | — | none | Fork this chain from a live RPC. `${VAR}` is expanded from the environment on load, so an RPC key stays out of the file. |
+| `fork_block` | integer | — | none | Pin the fork to a block height. **Requires `fork_url`.** |
+
+## Per-kind rules
+
+Validation depends on `kind`:
+
+| Kind | Node | `chain_id` | Forking |
+| --- | --- | --- | --- |
+| `evm` | Anvil | **Required, numeric** | `fork_url` + `fork_block` |
+| `zksync` | anvil-zksync | Optional; if set must be numeric (default `260`) | `fork_url` + `fork_block` |
+| `starknet` | starknet-devnet | Omitted (uses devnet's `SN_SEPOLIA`) | `fork_url` + `fork_block` |
+| `solana` | surfpool | Omitted (uses `localnet`) | `fork_url` only — `fork_block` is **rejected** |
+| `bitcoin` / `litecoin` | bitcoind / litecoind (regtest) | Omitted | **None** — `fork_url` is rejected (regtest is standalone) |
+
+## Examples
+
+Two custom EVM chains plus a forked mainnet:
+
+```toml
+[[chains]]
+name = "local"
+port = 8545
+chain_id = 1337
+
+[[chains]]
+name = "mainnet-fork"
+port = 8546
+chain_id = 1
+fork_url = "https://eth-mainnet.example/${ALCHEMY_KEY}"   # ${VAR} from env
+fork_block = 21000000
+```
+
+A single Solana chain forking mainnet-beta:
+
+```toml
+[[chains]]
+name = "solana-1"
+kind = "solana"
+port = 8899
+fork_url = "https://api.mainnet-beta.solana.com"
+```
+
+## Validation errors
+
+Loading fails loudly (non-zero exit, `error:` on stderr) on: an empty `chains`
+array, an unknown `kind`, an unsafe `name`, duplicate `name`/`port`/`chain_id`,
+a non-numeric EVM/zkSync `chain_id`, a missing EVM `chain_id`, `fork_block`
+without `fork_url`, a `fork_url` on a UTXO chain, a `fork_block` on Solana, a
+`fork_url` containing quotes/whitespace, or a `${VAR}` that is unset or expands
+to empty.
+
+## Accounts & tokens are not configurable
+
+Funded dev accounts and pre-deployed test tokens come from each engine's baked
+state, not this file — so they're deterministic across every boot. See
+[Concepts](/concepts) and the per-chain guides for what each kind ships.
+
+---
+
+# Manifest Reference (wharfnet.json)
+
+Source: https://sainathr19.github.io/wharfnet/reference/manifest/
+
+When `wharfnet up` boots a localnet it writes a machine-readable manifest to
+`.wharfnet/wharfnet.json`. This is the **single source of truth** for a running
+network — RPC URLs, chain IDs, funded accounts, pre-deployed tokens, and explorer
+URLs. The [`testkit`](/reference/testkit) library and `wharfnet status --json`
+both read it; your own scripts and agents should too, instead of hard-coding
+endpoints.
+
+  The manifest is written atomically (temp file + rename), so a concurrent reader
+  never sees a truncated file.
+
+## Top-level shape
+
+```json
+{
+  "version": "0.1",
+  "project": "wharfnet",
+  "chains": [ /* ChainEntry, one per running chain */ ]
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `version` | string | Manifest schema version (`"0.1"`). |
+| `project` | string | Compose project name (`"wharfnet"`). |
+| `chains` | array | One [`ChainEntry`](#chainentry) per booted chain, in topology order. |
+
+## `ChainEntry`
+
+| Field | Type | Always present? | Description |
+| --- | --- | --- | --- |
+| `name` | string | ✅ | Chain name, e.g. `"anvil-1"`. |
+| `kind` | string | ✅ | `evm`, `starknet`, `solana`, `bitcoin`, `litecoin`, or `zksync`. |
+| `rpc` | string | ✅ | HTTP JSON-RPC URL. For UTXO chains it embeds dev credentials (`http://wharfnet:wharfnet@…`). |
+| `ws` | string | only when distinct | WebSocket RPC URL, present only when it's on a **different** port than HTTP (Solana: HTTP port + 1). Omitted otherwise. |
+| `chain_id` | string | ✅ | Chain identifier as a string — decimal for EVM/zkSync (`"31337"`), a felt for Starknet, `"localnet"` for Solana, `"regtest"` for UTXO. |
+| `accounts` | array | ✅ | Funded dev [`Account`](#account) objects. |
+| `tokens` | array | ✅ (may be empty) | Pre-deployed test [`Token`](#token)s. |
+| `contracts` | array | ✅ (may be empty) | Canonical infra [`Contract`](#contract)s (Multicall3, Permit2, CREATE2 deployer). |
+| `fork` | string | only when forking | Redacted description of the fork source (host + pinned block); the RPC key is never recorded. Omitted otherwise. |
+| `explorer` | string | only when booted | Bundled block-explorer URL. Omitted with `--bare` or where the chain has no explorer. |
+
+### `Account`
+
+```json
+{ "address": "0xf39F…2266", "private_key": "0xac09…ff80", "balance": "10000 ETH" }
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `address` | string | Account address. |
+| `private_key` | string | Spendable key. For UTXO chains this is a note like `"(spendable via node wallet 'wharfnet')"` — regtest descriptor wallets don't export raw keys. |
+| `balance` | string | Human-readable starting balance, e.g. `"10000 ETH"`, `"50 BTC"`. |
+
+### `Token`
+
+```json
+{ "symbol": "USDC", "name": "USD Coin", "address": "0x5FbD…0aa3", "decimals": 6 }
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `symbol` | string | Ticker, e.g. `"USDC"`. |
+| `name` | string | Full token name. |
+| `address` | string | Deterministic on-chain address (EVM/Starknet) or mint (Solana). |
+| `decimals` | integer | Token decimals. |
+
+### `Contract`
+
+```json
+{ "name": "Multicall3", "address": "0xcA11…CA11" }
+```
+
+Canonical infra deployed at its real, chain-agnostic address, so tooling that
+hard-codes it just works.
+
+## Full example
+
+```json
+{
+  "version": "0.1",
+  "project": "wharfnet",
+  "chains": [
+    {
+      "name": "anvil-1",
+      "kind": "evm",
+      "rpc": "http://127.0.0.1:8545",
+      "chain_id": "31337",
+      "accounts": [
+        { "address": "0xf39F…2266", "private_key": "0xac09…ff80", "balance": "10000 ETH" }
+      ],
+      "tokens": [
+        { "symbol": "USDC", "name": "USD Coin", "address": "0x5FbD…0aa3", "decimals": 6 }
+      ],
+      "contracts": [
+        { "name": "Multicall3", "address": "0xcA11…CA11" }
+      ],
+      "explorer": "http://127.0.0.1:5100"
+    }
+  ]
+}
+```
+
+## `status --json`
+
+`wharfnet status --json` wraps the manifest with a top-level `running` flag:
+
+```json
+{ "running": true, "project": "wharfnet", "chains": [ /* ChainEntry[] */ ] }
+```
+
+Each entry uses the exact `ChainEntry` schema above. When nothing is running the
+output is still valid JSON: `{ "running": false, "project": null, "chains": [] }`.
+
+---
+
+# testkit Reference (Rust)
+
+Source: https://sainathr19.github.io/wharfnet/reference/testkit/
+
+wharfnet is a library as well as a CLI. Add it as a dev-dependency and connect to
+a running localnet from an integration test — no hard-coded URLs or token
+addresses, everything read from the [manifest](/reference/manifest) that
+`wharfnet up` writes.
+
+```toml
+# Cargo.toml
+[dev-dependencies]
+wharfnet = "0.1.0-alpha.1"   # pre-release: pin the exact version
+```
+
+  `testkit` **reads** a running localnet; it does not boot one. Run `wharfnet up`
+  first (e.g. in a test setup script or CI step), then connect.
+
+## Quick start
+
+```rust
+use wharfnet::testkit::Localnet;
+
+let net = Localnet::connect()?;      // reads ./.wharfnet/wharfnet.json
+let evm = net.evm();                 // first EVM chain (panics if none)
+let rpc = evm.rpc_url();             // "http://127.0.0.1:8545"
+let usdc = evm.token("USDC");        // { symbol, name, address, decimals }
+let dev0 = evm.account(0);           // funded signer: address + private_key
+let abi = evm.token_abi("USDC");     // Option<&'static str> — embedded ABI
+```
+
+## `Localnet`
+
+A handle to a running localnet, constructed from the manifest.
+
+| Method | Returns | Description |
+| --- | --- | --- |
+| `Localnet::connect()` | `Result<Localnet>` | Read `.wharfnet/wharfnet.json` in the current directory. Errors with a hint if nothing is running. |
+| `Localnet::connect_from(dir)` | `Result<Localnet>` | Connect from an explicit `.wharfnet` state dir (when the test runs from a different cwd than `up`). |
+| `.chains()` | `impl Iterator<Item = Chain>` | Every chain in the manifest. |
+| `.chain(name)` | `Result<Chain>` | A chain by exact name (`"anvil-1"`). |
+| `.of_kind(kind)` | `Result<Chain>` | The first chain of a kind (`"evm"`, `"zksync"`, `"bitcoin"`…). |
+| `.evm()` | `Chain` | First EVM chain. **Panics** if none — convenient when a missing chain is a setup error. |
+| `.solana()` | `Chain` | First Solana chain (panics if none). |
+| `.starknet()` | `Chain` | First Starknet chain (panics if none). |
+
+  Convenience accessors exist for `evm()` / `solana()` / `starknet()`. For zkSync,
+  Bitcoin, or Litecoin use `of_kind("zksync")` or `chain("zksync-1")`.
+
+## `Chain`
+
+A borrowed view over one manifest chain entry — cheap to copy. Accessors return
+references tied to the manifest, so values outlive the temporary `Chain`.
+
+| Method | Returns | Description |
+| --- | --- | --- |
+| `.name()` | `&str` | Chain name (`"anvil-1"`). |
+| `.kind()` | `&str` | Chain kind (`"evm"`). |
+| `.rpc_url()` | `&str` | HTTP JSON-RPC URL — point your client here. |
+| `.ws_url()` | `Option<&str>` | WebSocket URL when served on a distinct port (Solana); `None` otherwise. |
+| `.chain_id()` | `&str` | Chain id as a string (`"31337"`, a felt, `"localnet"`, `"regtest"`). |
+| `.explorer()` | `Option<&str>` | Bundled explorer URL, when booted (skipped by `--bare`). |
+| `.accounts()` | `&[Account]` | All funded dev accounts. |
+| `.account(i)` | `&Account` | The i-th account. **Panics** if out of range. |
+| `.tokens()` | `&[Token]` | Pre-deployed test tokens. |
+| `.token(symbol)` | `&Token` | A token by symbol. **Panics** if this chain lacks it. |
+| `.try_token(symbol)` | `Option<&Token>` | A token by symbol, or `None`. |
+| `.token_abi(symbol)` | `Option<&'static str>` | Embedded contract ABI JSON (EVM/Starknet); `None` for Solana SPL and Starknet fee tokens. |
+| `.entry()` | `&ChainEntry` | The raw manifest entry, for fields not surfaced above (e.g. `contracts`, `fork`). |
+
+`Account`, `Token`, and `ChainEntry` are the [manifest](/reference/manifest)
+types, re-exported from the crate root (`wharfnet::{Account, Token, ChainEntry, …}`).
+
+## Embedded ABIs — `wharfnet::abi`
+
+The bundled test tokens' contract ABIs are embedded so you can instantiate a
+token without fetching or hand-writing one. Prefer `Chain::token_abi(symbol)`;
+the raw constants are also exported:
+
+| Constant | Contents |
+| --- | --- |
+| `wharfnet::abi::evm::TEST_TOKEN` | Standard EVM ERC-20 test token ABI. |
+| `wharfnet::abi::evm::FEE_TOKEN` | Fee-on-transfer token ABI. |
+| `wharfnet::abi::evm::REBASING_TOKEN` | Rebasing token ABI. |
+| `wharfnet::abi::evm::NO_RETURN_TOKEN` | Non-standard (no-return) ERC-20 ABI. |
+| `wharfnet::abi::starknet::TEST_TOKEN` | Starknet test token ABI. |
+| `wharfnet::abi::starknet::FEE_TOKEN` | Starknet fee token ABI. |
+| `wharfnet::abi::starknet::REBASING_TOKEN` | Starknet rebasing token ABI. |
+| `wharfnet::abi::token_abi(kind, symbol)` | Look up an ABI by chain kind + symbol; `None` if not shipped. |
+
+Solana tokens are standard SPL, so no custom interface is shipped.
+
+## Example: an integration test
+
+```rust
+use wharfnet::testkit::Localnet;
+
+#[test]
+fn transfers_usdc_between_dev_accounts() -> anyhow::Result<()> {
+    let net = Localnet::connect()?;
+    let evm = net.evm();
+
+    let usdc = evm.token("USDC");
+    let (from, to) = (evm.account(0), evm.account(1));
+
+    // Point viem/ethers/alloy at evm.rpc_url(), sign with from.private_key,
+    // call transfer() on usdc.address using evm.token_abi("USDC").
+    // ...
+    let _ = (usdc, from, to, evm.chain_id());
+    Ok(())
+}
+```
+
+---
+
+# Examples
+
+Source: https://sainathr19.github.io/wharfnet/examples/
+
+Two ways to drive a running localnet: **from the CLI** with the bundled recipe
+scripts, or **from application code** with your usual client library pointed at
+the manifest's endpoints. Boot the network first:
+
+```sh
+wharfnet up          # or: wharfnet up --bare
+```
+
+## From the CLI
+
+Task-oriented shell recipes live in [`examples/`](https://github.com/sainathr19/wharfnet/tree/main/examples).
+Each reads endpoints, accounts, and token addresses straight from
+`.wharfnet/wharfnet.json` (via `jq`), so nothing is hard-coded.
+
+| Recipe | What it shows |
+| ------ | ------------- |
+| [evm/fund-and-transfer.sh](https://github.com/sainathr19/wharfnet/blob/main/examples/evm/fund-and-transfer.sh) | Faucet an address, send an ERC-20 transfer, read balances |
+| [evm/snapshot-revert.sh](https://github.com/sainathr19/wharfnet/blob/main/examples/evm/snapshot-revert.sh) | Snapshot state, mutate it, roll back — the test-isolation pattern |
+| [evm/fork-and-impersonate.sh](https://github.com/sainathr19/wharfnet/blob/main/examples/evm/fork-and-impersonate.sh) | Fork mainnet, impersonate a whale, move real USDC with no key |
+| [solana/airdrop-and-tokens.sh](https://github.com/sainathr19/wharfnet/blob/main/examples/solana/airdrop-and-tokens.sh) | Airdrop SOL, top up SPL tokens, read balances over JSON-RPC |
+| [starknet/fund-and-read.sh](https://github.com/sainathr19/wharfnet/blob/main/examples/starknet/fund-and-read.sh) | Fund the Cairo test tokens, read an ERC-20 balance |
+| [ci/github-actions.yml](https://github.com/sainathr19/wharfnet/blob/main/examples/ci/github-actions.yml) | Boot the localnet in CI, run tests, tear down |
+
+## From application code
+
+Point your usual client at the endpoints from `wharfnet status` (or read them
+from `.wharfnet/wharfnet.json`). The chains behave like the real thing, so no
+wharfnet-specific SDK is needed.
+
+```ts
+
+// anvil-1's RPC, from `wharfnet status`
+const client = createPublicClient({ chain: anvil, transport: http('http://127.0.0.1:8545') })
+
+// USDC is pre-deployed at a fixed address on every EVM chain
+const USDC = '0x5FbDB2315678afecb367f032d93F642f64180aa3'
+const abi = [{
+  name: 'balanceOf', type: 'function', stateMutability: 'view',
+  inputs: [{ name: 'account', type: 'address' }], outputs: [{ type: 'uint256' }],
+}] as const
+
+const balance = await client.readContract({
+  address: USDC, abi, functionName: 'balanceOf',
+  args: ['0x70997970C51812dc3A010C7d01b50e0d17dc79C8'],
+})
+console.log('USDC balance (base units):', balance)
+```
+
+The dev accounts use Anvil's standard test mnemonic, so their private keys are
+well-known — sign with them via `createWalletClient` for writes.
+
+```ts
+
+// web3.js derives the WebSocket URL (port + 1) from the RPC URL automatically,
+// so subscriptions and confirmTransaction need no extra configuration.
+const connection = new Connection('http://127.0.0.1:8899', 'confirmed')
+
+// a funded dev account from `wharfnet status`
+const wallet = new PublicKey('9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM')
+console.log('SOL balance (lamports):', await connection.getBalance(wallet))
+
+// live subscription over the WebSocket endpoint (ws://127.0.0.1:8900)
+connection.onSlotChange(({ slot }) => console.log('slot', slot))
+```
+
+```ts
+
+// starknet-1's RPC is served under /rpc
+const provider = new RpcProvider({ nodeUrl: 'http://127.0.0.1:5050/rpc' })
+
+// USDC is a pre-deployed Cairo test token; balance_of returns a u256
+const USDC = '0x040b582f9ba878be8e78a6ddc665dfdfd55a4deae9ceeb40115abcfa1f8df686'
+const { abi } = await provider.getClassAt(USDC)
+const usdc = new Contract(abi, USDC, provider)
+
+const balance = await usdc.balance_of('0x064b48806902a367c8598f4f95c305e8c1a1acba5f082d294a43793113115691')
+console.log('USDC balance (base units):', balance)
+```
+
+  Need funded accounts or tokens at a specific address first? Use the
+  [faucet](/getting-started) — `wharfnet faucet <chain> <address> <amount>` tops
+  up the native coin and every test token, with no private key.
+
+## In Rust tests — `wharfnet::testkit`
+
+wharfnet is also a **library**. Add it as a `dev-dependency` and connect to a
+running localnet from an integration test — no hard-coded URLs or token
+addresses, all read from the manifest `wharfnet up` writes:
+
+```toml filename="Cargo.toml"
+[dev-dependencies]
+wharfnet = "0.1.0-alpha.1"   # pre-release: pin the exact version
+```
+
+```rust filename="tests/localnet.rs"
+use wharfnet::testkit::Localnet;
+
+#[test]
+fn usdc_is_seeded_on_solana() {
+    // Reads .wharfnet/wharfnet.json (run `wharfnet up` first, or in a CI step).
+    let net = Localnet::connect().unwrap();
+
+    let sol = net.solana();
+    let rpc = sol.rpc_url();          // e.g. http://127.0.0.1:8899
+    let ws = sol.ws_url();            // Some("ws://127.0.0.1:8900")
+    let usdc = sol.token("USDC");     // mint address + decimals
+    let dev0 = sol.account(0);        // funded dev account: address + private key
+
+    assert_eq!(usdc.decimals, 6);
+    // ... point solana-client / a signer built from dev0.private_key at `rpc`.
+    let _ = (rpc, ws);
+}
+```
+
+`net.evm()`, `net.starknet()`, `net.chain("anvil-2")`, and `net.chains()` give
+the same typed handles for every chain. Missing chains/tokens panic with a clear
+message (a setup error in tests), or use the `try_*`/`of_kind` variants to handle
+them yourself.
+
+The **contract ABIs** for the bundled test tokens are embedded too, so you can
+instantiate a token without fetching or hand-writing one — feed the JSON straight
+to viem/ethers/alloy (EVM) or starknet.js/starknet-rust (Starknet):
+
+```rust
+let evm = net.evm();
+let abi_json = evm.token_abi("USDC");   // Some(&str) — the ERC-20 + mint ABI
+// net.starknet().token_abi("REB")      → the rebasing-token Cairo ABI
+// Solana SPL tokens use the standard SPL Token program, so this is None.
+```
+
+The raw ABI constants are also available under `wharfnet::abi`
+(e.g. `wharfnet::abi::evm::TEST_TOKEN`, `wharfnet::abi::starknet::REBASING_TOKEN`).
+
+---
+
+# Changelog
+
+Source: https://sainathr19.github.io/wharfnet/changelog/
+
+Product updates and new capabilities. wharfnet is early WIP, published as a
+pre-release — the CLI and library surface may still change.
+
+---
+
+# Contributing
+
+Source: https://sainathr19.github.io/wharfnet/contributing/
+
+Contributions are welcome — issues and PRs alike.
+
+## Workflow
+
+Work lands on `main` through a PR (see the branch rules in
+[RELEASING.md](https://github.com/sainathr19/wharfnet/blob/main/RELEASING.md));
+`main` is protected. Keep changes focused and update the
+[CHANGELOG](https://github.com/sainathr19/wharfnet/blob/main/CHANGELOG.md)
+`## [Unreleased]` section with anything user-facing.
+
+## Before you push
+
+CI runs formatting, Clippy, tests, and a dependency audit (see
+`.github/workflows/`). Run them locally first:
+
+```sh
+cargo fmt --all
+cargo clippy --all-targets -- -D warnings
+cargo test
+```
+
+  Some tests boot real containers and need a running Docker daemon.
+
+## Adding a chain kind or capability
+
+Chains implement the `Engine` trait in `src/runtime/engine.rs`; the per-chain
+code lives under `src/<kind>/`. The per-chain guides ([EVM](/chains/evm),
+[Starknet](/chains/starknet), [Solana](/chains/solana)) describe how each stack wires up
+tokens, faucet, forking, and its explorer — a good map before you extend one.
+
+## Editing these docs
+
+This site is a [Nextra](https://nextra.site) app under `landing/`. To run it
+locally:
+
+```sh
+cd landing
+pnpm install
+pnpm dev
+```
+
+Pages are MDX files under `landing/content/`; the sidebar order is set in
+`landing/content/_meta.js`. Push to `main` and a GitHub Actions workflow builds
+and deploys the site to GitHub Pages.
+
+---

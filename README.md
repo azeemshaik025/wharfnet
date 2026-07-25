@@ -61,6 +61,13 @@ The site is a [Nextra](https://nextra.site) app under [`landing/`](landing/),
 deployed to GitHub Pages on every push to `main` (source pages live in
 [`landing/content/`](landing/content/)).
 
+**Using an AI coding agent?** Point it at
+[`/llms.txt`](https://sainathr19.github.io/wharfnet/llms.txt) — a curated,
+agent-readable index of the docs — or
+[`/llms-full.txt`](https://sainathr19.github.io/wharfnet/llms-full.txt) for the
+whole documentation as one file. Both are generated from the doc pages on every
+build, so they never drift.
+
 Runnable task recipes — fund + transfer, snapshot/revert, fork & impersonate,
 Solana airdrops, and a CI workflow — live in [`examples/`](examples/).
 

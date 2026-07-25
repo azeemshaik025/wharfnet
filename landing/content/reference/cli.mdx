@@ -1,0 +1,184 @@
+---
+title: CLI Reference
+---
+
+import { Callout } from 'nextra/components'
+
+# CLI Reference
+
+Every `wharfnet` command, flag, and default. The binary is `wharfnet`; run
+`wharfnet <command> --help` for the same information at the terminal.
+
+<Callout type="info">
+  Commands that boot or drive a chain shell out to `docker compose`, so they need
+  a running Docker daemon. Only `compose` and `status` work without one.
+</Callout>
+
+## Command summary
+
+| Command | Purpose |
+| --- | --- |
+| [`up`](#up) | Boot the localnet (all chains, or a selection). |
+| [`down`](#down) | Tear the localnet down and remove its containers. |
+| [`status`](#status) | Show running chains and endpoints (`--json` for machines). |
+| [`logs`](#logs) | Stream container logs. |
+| [`compose`](#compose) | Print the generated `docker-compose.yml` without booting. |
+| [`faucet`](#faucet) | Fund an address with native coin and/or test tokens. |
+| [`evm`](#chain-control) / [`starknet`](#chain-control) / [`solana`](#chain-control) / [`bitcoin`](#chain-control) / [`litecoin`](#chain-control) / [`zksync`](#chain-control) | Per-chain control (mine, warp, impersonate, snapshot…). |
+
+## `up`
+
+Boot the local multi-chain network. By default every boot starts fresh from the
+pre-deployed tokens and seeded accounts, and boots **every** chain in the topology
+with its bundled block explorer.
+
+```sh
+wharfnet up [CHAIN...] [--resume | --reset] [--bare] [-x CHAIN] [-c PATH]
+```
+
+| Argument / flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `[CHAIN...]` | positional, repeatable | all chains | Chains to boot — a kind (`evm`) or a name (`anvil-1`). Omit to boot the whole topology. |
+| `--resume` | flag | off | Restore the previous session if a saved snapshot exists, and keep saving. Mutually exclusive with `--reset`. |
+| `--reset` | flag | off | Discard any saved session snapshot and boot clean. |
+| `--bare` | flag | off | Boot only the chains — skip the bundled block explorers. |
+| `-x`, `--exclude <CHAIN>` | repeatable / comma-separated | none | Chains to skip (kind or name), applied after the selection. |
+| `-c`, `--config <PATH>` | path | `./wharfnet.toml` | Config file (see [`$WHARFNET_CONFIG`](#environment-variables)). |
+
+```sh
+wharfnet up                      # everything, fresh
+wharfnet up evm solana           # only those kinds
+wharfnet up -x bitcoin,litecoin  # everything except these
+wharfnet up --resume             # restore the last session
+```
+
+## `down`
+
+Tear down the local network and clean up its containers and compose project.
+Takes no arguments.
+
+```sh
+wharfnet down
+```
+
+## `status`
+
+Show the status and endpoints of running chains, read from the manifest.
+
+```sh
+wharfnet status [--json]
+```
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--json` | off | Emit a stable JSON document instead of the formatted report. See the [manifest reference](/reference/manifest#status---json). |
+
+With `--json`, the output is always valid JSON even when nothing is running
+(`{"running": false, "project": null, "chains": []}`), so scripts can branch on
+`running` without special-casing.
+
+## `logs`
+
+Stream container logs, optionally for a single chain or kind.
+
+```sh
+wharfnet logs [CHAIN] [-f]
+```
+
+| Argument / flag | Default | Description |
+| --- | --- | --- |
+| `[CHAIN]` | all services | A chain kind (`evm`) or name (`anvil-1`). |
+| `-f`, `--follow` | off | Keep streaming new output, like `tail -f`. |
+
+## `compose`
+
+Print the generated `docker-compose.yml` to stdout without booting anything —
+useful for inspection or debugging. Works without Docker.
+
+```sh
+wharfnet compose [CHAIN...] [--bare] [-x CHAIN] [-c PATH]
+```
+
+Flags mirror [`up`](#up): `[CHAIN...]`, `--bare`, `-x/--exclude`, `-c/--config`.
+
+## `faucet`
+
+Fund an address from the built-in faucet. Funding is **additive** — token
+top-ups read the current balance first.
+
+```sh
+wharfnet faucet <CHAIN> <ADDRESS> [AMOUNT] [--token SYMBOL] [--raw]
+```
+
+| Argument / flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `<CHAIN>` | positional (required) | — | Target — a kind (`evm`) funds every matching chain, or a name (`anvil-1`). |
+| `<ADDRESS>` | positional (required) | — | Recipient address. |
+| `[AMOUNT]` | positional | `100` | Decimal whole units (e.g. `1.5`), scaled by the token's decimals — or an exact base-unit integer with `--raw`. |
+| `--token <SYMBOL>` | string | none | Fund only this token (e.g. `USDC`). Omit to fund the native coin **and** every bundled token. |
+| `--raw` | flag | off | Treat `AMOUNT` as raw base units (wei / fri / a token's smallest unit). |
+
+```sh
+wharfnet faucet evm 0xabc... 100            # native + all tokens, every EVM chain
+wharfnet faucet anvil-1 0xabc... 50 --token USDC
+wharfnet faucet solana 9WzD…AWWM 5 --token USDC
+```
+
+## Chain control
+
+Per-chain cheat commands are grouped under a namespace per kind, because the
+verb set differs by engine. Each command targets chains with `--chain <KIND|NAME>`,
+defaulting to the namespace's own kind (so `wharfnet evm mine` hits every EVM
+chain). Bitcoin/Litecoin use `--chain` too but default to their own kind.
+
+### Verb support by chain
+
+| Verb | EVM | zkSync | Starknet | Solana | Bitcoin / Litecoin |
+| --- | :-: | :-: | :-: | :-: | :-: |
+| `mine <count>` | ✅ blocks | ✅ blocks | ✅ blocks | ✅ slots | ✅ blocks |
+| `increase-time <seconds>` | ✅ | ✅ | ✅ | ✅ | — |
+| `warp <timestamp>` | ✅ | ✅ | ✅ | ✅ forward-only | — |
+| `impersonate <addr> [--stop]` | ✅ | ✅ | ✅ *(fork only)* | — | — |
+| `snapshot` / `revert <id>` | ✅ | ✅ | — | — | — |
+| `pause-clock` / `resume-clock` | — | — | — | ✅ | — |
+
+Notes:
+- **Solana** `mine` advances *slots*; `warp` is forward-only (surfpool cannot rewind); `pause-clock`/`resume-clock` freeze and restart automatic slot production.
+- **Starknet** `impersonate` requires a forked chain (devnet only impersonates in forking mode); there is no snapshot/revert.
+- **Bitcoin/Litecoin** run regtest, which only mines on demand — `mine` is the whole surface.
+
+### Common forms
+
+```sh
+wharfnet evm mine 10 --chain anvil-2
+wharfnet evm increase-time 3600 --chain anvil-1
+wharfnet evm warp 4102444800 --chain anvil-1     # absolute Unix timestamp
+wharfnet evm impersonate 0xabc... --chain anvil-1
+wharfnet evm impersonate 0xabc... --stop --chain anvil-1
+wharfnet evm snapshot --chain anvil-1            # prints an id, e.g. 0x1
+wharfnet evm revert 0x1 --chain anvil-1
+
+wharfnet zksync mine 5 --chain zksync-1          # same verb set as evm
+
+wharfnet starknet mine --chain starknet-1
+wharfnet starknet warp 4102444800 --chain starknet-1
+
+wharfnet solana mine 2 --chain solana-1          # advances 2 slots
+wharfnet solana pause-clock --chain solana-1
+
+wharfnet bitcoin mine 6                           # defaults to --chain bitcoin
+wharfnet litecoin mine 6
+```
+
+## Environment variables
+
+| Variable | Used by | Effect |
+| --- | --- | --- |
+| `WHARFNET_CONFIG` | `up`, `compose` | Path to the config file, below an explicit `-c/--config` flag and above `./wharfnet.toml`. A path from here **must** exist. |
+| `WHARFNET_CHAINS` | `up`, `compose` | Default chain selection when no positional `[CHAIN...]` is given, e.g. `WHARFNET_CHAINS=evm,solana`. Comma-separated kinds or names. |
+
+## Exit status
+
+Commands exit `0` on success and print `error: <message>` to stderr with a
+non-zero exit on failure (e.g. Docker unavailable, no config match, a chain that
+fails to become ready).
