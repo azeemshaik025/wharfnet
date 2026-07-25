@@ -1,0 +1,33 @@
+name: Docs check
+
+# Verify the llms.txt index stays in sync with the doc pages. The llms.txt /
+# llms-full.txt files are generated on build (not committed), so this guards
+# against drift — a doc page added, renamed, or removed without updating the
+# index in landing/scripts/gen-llms.mjs.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'landing/**'
+      - '.github/workflows/docs-check.yml'
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'landing/**'
+      - '.github/workflows/docs-check.yml'
+
+concurrency:
+  group: docs-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  llms:
+    name: llms.txt consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # The generator is dependency-free (Node stdlib only), so no install step.
+      - run: node landing/scripts/gen-llms.mjs --check

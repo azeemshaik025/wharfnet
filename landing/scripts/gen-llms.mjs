@@ -15,6 +15,10 @@ const CONTENT = join(HERE, '..', 'content')
 const PUBLIC = join(HERE, '..', 'public')
 const BASE = 'https://sainathr19.github.io/wharfnet'
 
+// `--check` verifies the index is consistent with the doc pages (used by CI) and
+// writes nothing; without it, the files are (re)generated.
+const CHECK = process.argv.includes('--check')
+
 // Curated sections for the llms.txt index — routes without the leading slash.
 // Any page not listed here still gets appended to llms-full.txt (see below), so
 // a new page is never silently dropped; it just won't be indexed until added.
@@ -125,7 +129,36 @@ for (const file of walk(CONTENT)) {
   })
 }
 
-const intro = pages.get('')
+// ---- consistency check ----
+// The index in llms.txt must stay in sync with the pages: every indexed route
+// must exist, and every doc page (except the JSX-heavy landing page) must be
+// indexed. This catches the real drift — a page added, renamed, or removed
+// without updating SECTIONS. Fatal under `--check` (CI); a warning otherwise.
+{
+  const indexed = new Set(SECTIONS.flatMap((s) => s.routes))
+  const problems = []
+  for (const route of indexed) {
+    if (!pages.has(route)) {
+      problems.push(`index references a missing page: "${route}" (fix SECTIONS in scripts/gen-llms.mjs)`)
+    }
+  }
+  for (const route of pages.keys()) {
+    if (route !== '' && !indexed.has(route)) {
+      problems.push(`page "${route}" is not in the llms.txt index (add it to SECTIONS in scripts/gen-llms.mjs)`)
+    }
+  }
+  if (CHECK) {
+    if (problems.length) {
+      console.error('gen-llms --check: the llms.txt index is out of sync with the docs:')
+      for (const p of problems) console.error(`  - ${p}`)
+      process.exit(1)
+    }
+    console.log(`gen-llms --check: OK — ${pages.size} pages, index consistent`)
+    process.exit(0)
+  }
+  for (const p of problems) console.warn(`gen-llms: ${p}`)
+}
+
 const overview =
   'One-command localnet for EVM, Solana, Starknet, Bitcoin, Litecoin & zkSync — ' +
   'boot real dev nodes for every chain your app touches with a single command, ' +
@@ -139,10 +172,7 @@ const overview =
     out.push(`## ${section.title}`, ``)
     for (const route of section.routes) {
       const p = pages.get(route)
-      if (!p) {
-        console.warn(`gen-llms: llms.txt references missing page "${route}"`)
-        continue
-      }
+      if (!p) continue // already reported by the consistency check above
       out.push(`- [${p.title}](${p.url})${p.summary ? `: ${p.summary}` : ''}`)
     }
     out.push(``)

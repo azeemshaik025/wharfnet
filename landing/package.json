@@ -5,6 +5,7 @@
   "description": "Documentation site for wharfnet",
   "scripts": {
     "gen-llms": "node scripts/gen-llms.mjs",
+    "check-llms": "node scripts/gen-llms.mjs --check",
     "predev": "node scripts/gen-llms.mjs",
     "dev": "next dev",
     "prebuild": "node scripts/gen-llms.mjs",
