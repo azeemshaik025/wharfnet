@@ -84,25 +84,39 @@ impl Localnet {
             .with_context(|| format!("no {kind} chain in the running localnet"))
     }
 
-    /// The first EVM chain. Panics if none is running — convenient in tests
-    /// where a missing chain is a setup error, not a case to handle.
-    pub fn evm(&self) -> Chain<'_> {
-        self.expect_kind(ChainKind::Evm)
-    }
-
-    /// The first Solana chain. Panics if none is running.
-    pub fn solana(&self) -> Chain<'_> {
-        self.expect_kind(ChainKind::Solana)
-    }
-
-    /// The first Starknet chain. Panics if none is running.
-    pub fn starknet(&self) -> Chain<'_> {
-        self.expect_kind(ChainKind::Starknet)
-    }
-
     fn expect_kind(&self, kind: ChainKind) -> Chain<'_> {
         self.of_kind(kind).unwrap_or_else(|e| panic!("{e}"))
     }
+}
+
+/// Generate a panicking per-kind accessor for each [`ChainKind`], so the set
+/// stays in lockstep with the enum instead of being hand-maintained (and never
+/// silently missing a kind, as it was before). Each is a thin wrapper over
+/// [`Localnet::of_kind`] that panics when the chain isn't running — convenient
+/// in tests where a missing chain is a setup error, not a case to handle.
+macro_rules! kind_accessors {
+    ($($method:ident => $variant:ident),+ $(,)?) => {
+        impl Localnet {
+            $(
+                #[doc = concat!(
+                    "The first `", stringify!($variant),
+                    "` chain. Panics if none is running."
+                )]
+                pub fn $method(&self) -> Chain<'_> {
+                    self.expect_kind(ChainKind::$variant)
+                }
+            )+
+        }
+    };
+}
+
+kind_accessors! {
+    evm => Evm,
+    starknet => Starknet,
+    solana => Solana,
+    bitcoin => Bitcoin,
+    litecoin => Litecoin,
+    zksync => Zksync,
 }
 
 /// A single chain's endpoints, funded accounts, and pre-deployed tokens.
@@ -353,6 +367,43 @@ mod tests {
             net.starknet().entry().fork.as_deref(),
             Some("https://sepolia")
         );
+    }
+
+    #[test]
+    fn generated_accessors_cover_every_kind() {
+        // The macro-generated accessors exist for the UTXO and zkSync kinds too,
+        // not just the original three — one per ChainKind variant.
+        let dir = tempdir().unwrap();
+        let entry = |name: &str, kind: ChainKind| ChainEntry {
+            name: name.into(),
+            kind,
+            rpc: "http://127.0.0.1:0".into(),
+            ws: None,
+            chain_id: "x".into(),
+            accounts: vec![],
+            tokens: vec![],
+            contracts: vec![],
+            fork: None,
+            explorer: None,
+        };
+        Manifest::new(vec![
+            entry("anvil-1", ChainKind::Evm),
+            entry("starknet-1", ChainKind::Starknet),
+            entry("solana-1", ChainKind::Solana),
+            entry("bitcoin-1", ChainKind::Bitcoin),
+            entry("litecoin-1", ChainKind::Litecoin),
+            entry("zksync-1", ChainKind::Zksync),
+        ])
+        .write(&manifest_path(dir.path()))
+        .unwrap();
+        let net = Localnet::connect_from(dir.path()).unwrap();
+
+        assert_eq!(net.evm().kind(), ChainKind::Evm);
+        assert_eq!(net.starknet().kind(), ChainKind::Starknet);
+        assert_eq!(net.solana().kind(), ChainKind::Solana);
+        assert_eq!(net.bitcoin().name(), "bitcoin-1");
+        assert_eq!(net.litecoin().name(), "litecoin-1");
+        assert_eq!(net.zksync().kind(), ChainKind::Zksync);
     }
 
     #[test]
