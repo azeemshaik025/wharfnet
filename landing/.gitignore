@@ -5,3 +5,9 @@
 *.tsbuildinfo
 next-env.d.ts
 .DS_Store
+
+# Generated from the MDX pages by scripts/gen-llms.mjs on prebuild; regenerated
+# on every build and never committed. CI (docs-check) verifies the index stays
+# consistent with the doc pages via `gen-llms.mjs --check`.
+/public/llms.txt
+/public/llms-full.txt

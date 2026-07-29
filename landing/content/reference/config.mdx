@@ -1,0 +1,106 @@
+---
+title: Config Reference (wharfnet.toml)
+---
+
+import { Callout } from 'nextra/components'
+
+# Config Reference — `wharfnet.toml`
+
+wharfnet is **zero-config**: with no `wharfnet.toml` it boots the [default
+topology](#default-topology). A config file customizes the chain topology — which
+chains to boot and their ports, chain IDs, block times, and fork settings.
+
+<Callout type="warning">
+  A config **replaces** the defaults entirely. If you write a `wharfnet.toml`,
+  list every chain you want — the built-in chains are not merged in.
+</Callout>
+
+## Resolution order
+
+The config path is resolved as: an explicit `-c/--config` flag → the
+`WHARFNET_CONFIG` env var → `./wharfnet.toml`. A path from the flag or env var
+**must** exist (a missing one is a loud error); the default `./wharfnet.toml` is
+optional (absent → built-in defaults).
+
+## Schema
+
+The file has one top-level key, `chains`, an array of chain tables. Unknown
+fields are rejected.
+
+```toml
+[[chains]]
+name = "anvil-1"       # required
+kind = "evm"           # default: "evm"
+port = 8545            # required
+chain_id = 31337       # int or string; required for evm/zksync-if-set
+block_time = 1         # default: 1 (seconds); EVM/zkSync only
+# fork_url = "..."     # optional
+# fork_block = 0       # optional; requires fork_url
+```
+
+### Fields
+
+| Field | Type | Required | Default | Notes |
+| --- | --- | --- | --- | --- |
+| `name` | string | ✅ | — | Becomes the container/service name. Letters, digits, `.`, `_`, `-` only. Must be unique. |
+| `kind` | string | — | `"evm"` | One of `evm`, `starknet`, `solana`, `bitcoin`, `litecoin`, `zksync`. |
+| `port` | integer | ✅ | — | Published host port for the RPC. Must be unique across chains. |
+| `chain_id` | integer **or** string | see [per-kind](#per-kind-rules) | — | Accepts a TOML integer (`31337`) or string (`"SN_SEPOLIA"`). Must be unique. |
+| `block_time` | integer | — | `1` | Auto-mining interval in seconds. EVM/zkSync only; ignored elsewhere. |
+| `fork_url` | string | — | none | Fork this chain from a live RPC. `${VAR}` is expanded from the environment on load, so an RPC key stays out of the file. |
+| `fork_block` | integer | — | none | Pin the fork to a block height. **Requires `fork_url`.** |
+
+## Per-kind rules
+
+Validation depends on `kind`:
+
+| Kind | Node | `chain_id` | Forking |
+| --- | --- | --- | --- |
+| `evm` | Anvil | **Required, numeric** | `fork_url` + `fork_block` |
+| `zksync` | anvil-zksync | Optional; if set must be numeric (default `260`) | `fork_url` + `fork_block` |
+| `starknet` | starknet-devnet | Omitted (uses devnet's `SN_SEPOLIA`) | `fork_url` + `fork_block` |
+| `solana` | surfpool | Omitted (uses `localnet`) | `fork_url` only — `fork_block` is **rejected** |
+| `bitcoin` / `litecoin` | bitcoind / litecoind (regtest) | Omitted | **None** — `fork_url` is rejected (regtest is standalone) |
+
+## Examples
+
+Two custom EVM chains plus a forked mainnet:
+
+```toml
+[[chains]]
+name = "local"
+port = 8545
+chain_id = 1337
+
+[[chains]]
+name = "mainnet-fork"
+port = 8546
+chain_id = 1
+fork_url = "https://eth-mainnet.example/${ALCHEMY_KEY}"   # ${VAR} from env
+fork_block = 21000000
+```
+
+A single Solana chain forking mainnet-beta:
+
+```toml
+[[chains]]
+name = "solana-1"
+kind = "solana"
+port = 8899
+fork_url = "https://api.mainnet-beta.solana.com"
+```
+
+## Validation errors
+
+Loading fails loudly (non-zero exit, `error:` on stderr) on: an empty `chains`
+array, an unknown `kind`, an unsafe `name`, duplicate `name`/`port`/`chain_id`,
+a non-numeric EVM/zkSync `chain_id`, a missing EVM `chain_id`, `fork_block`
+without `fork_url`, a `fork_url` on a UTXO chain, a `fork_block` on Solana, a
+`fork_url` containing quotes/whitespace, or a `${VAR}` that is unset or expands
+to empty.
+
+## Accounts & tokens are not configurable
+
+Funded dev accounts and pre-deployed test tokens come from each engine's baked
+state, not this file — so they're deterministic across every boot. See
+[Concepts](/concepts) and the per-chain guides for what each kind ships.
