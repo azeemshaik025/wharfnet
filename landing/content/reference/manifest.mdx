@@ -1,0 +1,122 @@
+---
+title: Manifest Reference (wharfnet.json)
+---
+
+import { Callout } from 'nextra/components'
+
+# Manifest Reference — `wharfnet.json`
+
+When `wharfnet up` boots a localnet it writes a machine-readable manifest to
+`.wharfnet/wharfnet.json`. This is the **single source of truth** for a running
+network — RPC URLs, chain IDs, funded accounts, pre-deployed tokens, and explorer
+URLs. The [`testkit`](/reference/testkit) library and `wharfnet status --json`
+both read it; your own scripts and agents should too, instead of hard-coding
+endpoints.
+
+<Callout type="info">
+  The manifest is written atomically (temp file + rename), so a concurrent reader
+  never sees a truncated file.
+</Callout>
+
+## Top-level shape
+
+```json
+{
+  "version": "0.1",
+  "project": "wharfnet",
+  "chains": [ /* ChainEntry, one per running chain */ ]
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `version` | string | Manifest schema version (`"0.1"`). |
+| `project` | string | Compose project name (`"wharfnet"`). |
+| `chains` | array | One [`ChainEntry`](#chainentry) per booted chain, in topology order. |
+
+## `ChainEntry`
+
+| Field | Type | Always present? | Description |
+| --- | --- | --- | --- |
+| `name` | string | ✅ | Chain name, e.g. `"anvil-1"`. |
+| `kind` | string | ✅ | `evm`, `starknet`, `solana`, `bitcoin`, `litecoin`, or `zksync`. |
+| `rpc` | string | ✅ | HTTP JSON-RPC URL. For UTXO chains it embeds dev credentials (`http://wharfnet:wharfnet@…`). |
+| `ws` | string | only when distinct | WebSocket RPC URL, present only when it's on a **different** port than HTTP (Solana: HTTP port + 1). Omitted otherwise. |
+| `chain_id` | string | ✅ | Chain identifier as a string — decimal for EVM/zkSync (`"31337"`), a felt for Starknet, `"localnet"` for Solana, `"regtest"` for UTXO. |
+| `accounts` | array | ✅ | Funded dev [`Account`](#account) objects. |
+| `tokens` | array | ✅ (may be empty) | Pre-deployed test [`Token`](#token)s. |
+| `contracts` | array | ✅ (may be empty) | Canonical infra [`Contract`](#contract)s (Multicall3, Permit2, CREATE2 deployer). |
+| `fork` | string | only when forking | Redacted description of the fork source (host + pinned block); the RPC key is never recorded. Omitted otherwise. |
+| `explorer` | string | only when booted | Bundled block-explorer URL. Omitted with `--bare` or where the chain has no explorer. |
+
+### `Account`
+
+```json
+{ "address": "0xf39F…2266", "private_key": "0xac09…ff80", "balance": "10000 ETH" }
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `address` | string | Account address. |
+| `private_key` | string | Spendable key. For UTXO chains this is a note like `"(spendable via node wallet 'wharfnet')"` — regtest descriptor wallets don't export raw keys. |
+| `balance` | string | Human-readable starting balance, e.g. `"10000 ETH"`, `"50 BTC"`. |
+
+### `Token`
+
+```json
+{ "symbol": "USDC", "name": "USD Coin", "address": "0x5FbD…0aa3", "decimals": 6 }
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `symbol` | string | Ticker, e.g. `"USDC"`. |
+| `name` | string | Full token name. |
+| `address` | string | Deterministic on-chain address (EVM/Starknet) or mint (Solana). |
+| `decimals` | integer | Token decimals. |
+
+### `Contract`
+
+```json
+{ "name": "Multicall3", "address": "0xcA11…CA11" }
+```
+
+Canonical infra deployed at its real, chain-agnostic address, so tooling that
+hard-codes it just works.
+
+## Full example
+
+```json
+{
+  "version": "0.1",
+  "project": "wharfnet",
+  "chains": [
+    {
+      "name": "anvil-1",
+      "kind": "evm",
+      "rpc": "http://127.0.0.1:8545",
+      "chain_id": "31337",
+      "accounts": [
+        { "address": "0xf39F…2266", "private_key": "0xac09…ff80", "balance": "10000 ETH" }
+      ],
+      "tokens": [
+        { "symbol": "USDC", "name": "USD Coin", "address": "0x5FbD…0aa3", "decimals": 6 }
+      ],
+      "contracts": [
+        { "name": "Multicall3", "address": "0xcA11…CA11" }
+      ],
+      "explorer": "http://127.0.0.1:5100"
+    }
+  ]
+}
+```
+
+## `status --json`
+
+`wharfnet status --json` wraps the manifest with a top-level `running` flag:
+
+```json
+{ "running": true, "project": "wharfnet", "chains": [ /* ChainEntry[] */ ] }
+```
+
+Each entry uses the exact `ChainEntry` schema above. When nothing is running the
+output is still valid JSON: `{ "running": false, "project": null, "chains": [] }`.
