@@ -24,9 +24,9 @@ curl -s -X POST http://127.0.0.1:8011 \
 
 <Callout type="info">
   Writing Rust tests? Read the endpoints and the funded account from a running
-  localnet with [`wharfnet::testkit`](/examples). zkSync has no per-kind accessor,
-  so select by name: `net.chain("zksync-1")?.rpc_url()` and `.account(0)` (a
-  funded dev account with its private key). There are no test tokens yet, so
+  localnet with [`wharfnet::testkit`](/examples): `net.zksync().rpc_url()` and
+  `.account(0)` (a funded dev account with its private key) — or select by name
+  with `net.chain("zksync-1")?`. There are no test tokens yet, so
   `token`/`token_abi` don't apply.
 </Callout>
 
