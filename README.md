@@ -139,10 +139,11 @@ wharfnet = "0.1.0-alpha.1"   # pre-release: pin the exact version
 ```
 
 ```rust
-use wharfnet::testkit::Localnet;
+use wharfnet::{testkit::Localnet, ChainKind};
 
 let net = Localnet::connect()?;      // reads .wharfnet/wharfnet.json
-let sol = net.solana();              // also .evm() / .starknet() / .chain("anvil-2")
+let sol = net.solana();              // per-kind accessor; also .evm() / .starknet()
+                                     // by value: net.of_kind(ChainKind::Solana)? — or .chain("anvil-2")
 let rpc = sol.rpc_url();             // + .ws_url(), .chain_id(), .explorer()
 let usdc = sol.token("USDC");        // { address, decimals, .. }
 let dev0 = sol.account(0);           // funded signer: address + private_key
