@@ -37,6 +37,11 @@ pub mod abi;
 pub mod cli;
 pub mod testkit;
 
+// The chain-kind enum, re-exported at the crate root so downstream code can
+// name it as `wharfnet::ChainKind` (and pass `ChainKind::Evm`, …) without
+// reaching through the `runtime::kind` module path.
+pub use runtime::kind::ChainKind;
+
 // The manifest data model, re-exported for downstream tests that want the raw
 // types behind the [`testkit`] handles.
 pub use runtime::manifest::{Account, ChainEntry, Contract, Manifest, Token};
