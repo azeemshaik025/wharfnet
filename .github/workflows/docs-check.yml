@@ -11,7 +11,7 @@ on:
       - 'landing/**'
       - '.github/workflows/docs-check.yml'
   pull_request:
-    branches: [main, dev]
+    branches: [main]
     paths:
       - 'landing/**'
       - '.github/workflows/docs-check.yml'
