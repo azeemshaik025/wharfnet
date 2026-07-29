@@ -181,6 +181,7 @@ fn block_timestamp(session: &Session, chain: &ChainEntry) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::kind::ChainKind;
     use crate::runtime::manifest::{Account, ChainEntry, Manifest};
     use crate::runtime::orchestrator::manifest_path;
     use tempfile::tempdir;
@@ -188,7 +189,7 @@ mod tests {
     fn evm_chain() -> ChainEntry {
         ChainEntry {
             name: "anvil-1".into(),
-            kind: "evm".into(),
+            kind: ChainKind::Evm,
             rpc: "http://127.0.0.1:8545".into(),
             ws: None,
             chain_id: "31337".into(),
@@ -240,7 +241,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let mut solana = evm_chain();
         solana.name = "solana-1".into();
-        solana.kind = "solana".into();
+        solana.kind = ChainKind::Solana;
         write_manifest(dir.path(), vec![solana]);
         let err = mine_in(dir.path(), "p", "solana", 1).unwrap_err();
         assert!(err.to_string().contains("only supported on EVM"), "{err}");

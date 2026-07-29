@@ -22,6 +22,7 @@ use serde_json::{Value, json};
 use std::path::Path;
 
 use super::rpc;
+use crate::runtime::kind::ChainKind;
 use crate::runtime::manifest::{ChainEntry, Manifest};
 use crate::runtime::orchestrator::{DEFAULT_STATE_DIR, manifest_path};
 
@@ -42,7 +43,7 @@ where
     }
     let manifest = Manifest::read(&manifest_file)?;
     for chain in manifest.select(selector)? {
-        if chain.kind != "solana" {
+        if chain.kind != ChainKind::Solana {
             bail!(
                 "chain control under `wharfnet solana` is only supported on Solana chains (chain '{}' is an {} chain)",
                 chain.name,
@@ -183,7 +184,7 @@ mod tests {
     fn solana_chain() -> ChainEntry {
         ChainEntry {
             name: "solana-1".into(),
-            kind: "solana".into(),
+            kind: ChainKind::Solana,
             rpc: "http://127.0.0.1:8899".into(),
             ws: Some("ws://127.0.0.1:8900".into()),
             chain_id: "localnet".into(),
@@ -235,7 +236,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let mut evm = solana_chain();
         evm.name = "anvil-1".into();
-        evm.kind = "evm".into();
+        evm.kind = ChainKind::Evm;
         write_manifest(dir.path(), vec![evm]);
         let err = mine_in(dir.path(), "evm", 1).unwrap_err();
         assert!(

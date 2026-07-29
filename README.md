@@ -146,10 +146,11 @@ wharfnet = "0.1.0-alpha.1"   # pre-release: pin the exact version
 ```
 
 ```rust
-use wharfnet::testkit::Localnet;
+use wharfnet::{testkit::Localnet, ChainKind};
 
 let net = Localnet::connect()?;      // reads .wharfnet/wharfnet.json
-let sol = net.solana();              // also .evm() / .starknet() / .chain("anvil-2")
+let sol = net.solana();              // per-kind accessor; also .evm() / .starknet()
+                                     // by value: net.of_kind(ChainKind::Solana)? — or .chain("anvil-2")
 let rpc = sol.rpc_url();             // + .ws_url(), .chain_id(), .explorer()
 let usdc = sol.token("USDC");        // { address, decimals, .. }
 let dev0 = sol.account(0);           // funded signer: address + private_key
@@ -272,10 +273,14 @@ Contributions are welcome — issues and PRs alike.
   ```
 
   Some tests boot real containers and need a running Docker daemon.
-- **Adding a chain kind or capability.** Chains implement the `Engine` trait in
-  `src/runtime/engine.rs`; the per-chain code lives under `src/<kind>/`. The
-  per-chain [docs](#documentation) describe how each stack wires up tokens,
-  faucet, forking, and its explorer — a good map before you extend one.
+- **Adding a chain kind or capability.** Start with a new variant on the
+  `ChainKind` enum in `src/runtime/kind.rs`; the exhaustive `match`es on it then
+  refuse to compile until every dispatch (engine selection, faucet, config
+  validation, token ABI) handles the new kind, so the compiler walks you through
+  the wiring. Chains implement the `Engine` trait in `src/runtime/engine.rs`, and
+  the per-chain code lives under `src/<kind>/`. The per-chain
+  [docs](#documentation) describe how each stack wires up tokens, faucet,
+  forking, and its explorer — a good map before you extend one.
 
 Releases are published to crates.io from a version tag — see
 [RELEASING.md](./RELEASING.md).

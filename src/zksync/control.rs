@@ -16,6 +16,7 @@ use std::path::Path;
 
 use super::rpc;
 use crate::evm::session::validate_address;
+use crate::runtime::kind::ChainKind;
 use crate::runtime::manifest::{ChainEntry, Manifest};
 use crate::runtime::orchestrator::{DEFAULT_STATE_DIR, manifest_path};
 
@@ -33,7 +34,7 @@ where
     }
     let manifest = Manifest::read(&manifest_file)?;
     for chain in manifest.select(selector)? {
-        if chain.kind != "zksync" {
+        if chain.kind != ChainKind::Zksync {
             bail!(
                 "chain control under `wharfnet zksync` is only supported on zkSync chains (chain '{}' is an {} chain)",
                 chain.name,
@@ -180,7 +181,7 @@ mod tests {
     fn zksync_chain() -> ChainEntry {
         ChainEntry {
             name: "zksync-1".into(),
-            kind: "zksync".into(),
+            kind: ChainKind::Zksync,
             rpc: "http://127.0.0.1:8011".into(),
             ws: None,
             chain_id: "260".into(),
@@ -238,7 +239,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let mut evm = zksync_chain();
         evm.name = "anvil-1".into();
-        evm.kind = "evm".into();
+        evm.kind = ChainKind::Evm;
         write_manifest(dir.path(), vec![evm]);
         let err = mine_in(dir.path(), "evm", 1).unwrap_err();
         assert!(

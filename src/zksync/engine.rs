@@ -6,6 +6,7 @@
 //! strings.
 
 use crate::runtime::engine::{Engine, HealthProbe, StateMode};
+use crate::runtime::kind::ChainKind;
 use crate::runtime::manifest::{Account, ChainEntry};
 
 /// Internal port the node listens on inside its container, irrespective of the
@@ -134,7 +135,7 @@ impl Engine for ZkSyncEngine {
     fn manifest_entry(&self) -> ChainEntry {
         ChainEntry {
             name: self.name.clone(),
-            kind: "zksync".to_string(),
+            kind: ChainKind::Zksync,
             rpc: format!("http://127.0.0.1:{}", self.host_port),
             // anvil-zksync serves WS on the same port as HTTP; nothing distinct
             // to advertise.
@@ -233,7 +234,7 @@ mod tests {
     #[test]
     fn manifest_entry_describes_the_chain() {
         let entry = ZkSyncEngine::new("zksync-1", 8011, 260).manifest_entry();
-        assert_eq!(entry.kind, "zksync");
+        assert_eq!(entry.kind, ChainKind::Zksync);
         assert_eq!(entry.rpc, "http://127.0.0.1:8011");
         assert_eq!(entry.chain_id, "260");
         assert!(entry.ws.is_none());

@@ -14,6 +14,7 @@
 use anyhow::{Result, bail};
 use std::path::Path;
 
+use crate::runtime::kind::ChainKind;
 use crate::runtime::manifest::Manifest;
 use crate::runtime::orchestrator::{DEFAULT_PROJECT, DEFAULT_STATE_DIR, manifest_path};
 
@@ -46,20 +47,22 @@ pub(crate) fn run_in(
     }
     let manifest = Manifest::read(&manifest_file)?;
     for chain in manifest.select(selector)? {
-        match chain.kind.as_str() {
-            "evm" => {
+        match chain.kind {
+            ChainKind::Evm => {
                 crate::evm::faucet::fund_chain(base, project, chain, address, amount, token, raw)?
             }
-            "starknet" => crate::starknet::faucet::fund_chain(chain, address, amount, token, raw)?,
-            "solana" => crate::solana::faucet::fund_chain(chain, address, amount, token, raw)?,
-            "bitcoin" | "litecoin" => {
+            ChainKind::Starknet => {
+                crate::starknet::faucet::fund_chain(chain, address, amount, token, raw)?
+            }
+            ChainKind::Solana => {
+                crate::solana::faucet::fund_chain(chain, address, amount, token, raw)?
+            }
+            ChainKind::Bitcoin | ChainKind::Litecoin => {
                 crate::utxo::faucet::fund_chain(chain, address, amount, token, raw)?
             }
-            "zksync" => crate::zksync::faucet::fund_chain(chain, address, amount, token, raw)?,
-            other => bail!(
-                "faucet is not yet supported for {other} chains (chain '{}')",
-                chain.name
-            ),
+            ChainKind::Zksync => {
+                crate::zksync::faucet::fund_chain(chain, address, amount, token, raw)?
+            }
         }
     }
     Ok(())
@@ -75,7 +78,7 @@ mod tests {
     fn evm_chain() -> ChainEntry {
         ChainEntry {
             name: "anvil-1".into(),
-            kind: "evm".into(),
+            kind: ChainKind::Evm,
             rpc: "http://127.0.0.1:8545".into(),
             ws: None,
             chain_id: "31337".into(),
@@ -128,17 +131,9 @@ mod tests {
         assert!(err.to_string().contains("no chain matching"), "{err}");
     }
 
-    #[test]
-    fn errors_on_unsupported_chain_kind() {
-        let dir = tempdir().unwrap();
-        let mut aptos = evm_chain();
-        aptos.name = "aptos-1".into();
-        aptos.kind = "aptos".into();
-        aptos.tokens.clear();
-        write_manifest(dir.path(), vec![aptos]);
-        let err = run_in(dir.path(), "p", "aptos", VALID_ADDR, "100", None, false).unwrap_err();
-        assert!(err.to_string().contains("not yet supported"), "{err}");
-    }
+    // Note: there's no "unsupported kind" dispatch test — the faucet matches on
+    // `ChainKind` exhaustively, so an unknown kind can't be constructed or reach
+    // here; a bad `kind` in a hand-written manifest is rejected at parse time.
 
     #[test]
     fn errors_on_invalid_evm_address() {

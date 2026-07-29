@@ -8,6 +8,7 @@
 //! lives in `src/resources/docker/services/` and is embedded at compile time.
 
 use crate::runtime::engine::{Engine, HealthProbe, StagedFile, StateMode};
+use crate::runtime::kind::ChainKind;
 use crate::runtime::manifest::{Account, ChainEntry, Contract, Token};
 
 /// Pinned devnet image. Pinned (like the Anvil and Otterscan images) so the
@@ -279,7 +280,7 @@ impl Engine for StarknetEngine {
         let forked = self.is_forked();
         ChainEntry {
             name: self.name.clone(),
-            kind: "starknet".to_string(),
+            kind: ChainKind::Starknet,
             // devnet serves JSON-RPC at /rpc (and /).
             rpc: format!("http://127.0.0.1:{}/rpc", self.host_port),
             ws: None,
@@ -470,7 +471,7 @@ mod tests {
     #[test]
     fn manifest_entry_describes_the_chain() {
         let entry = StarknetEngine::devnet("starknet-1", 5050).manifest_entry();
-        assert_eq!(entry.kind, "starknet");
+        assert_eq!(entry.kind, ChainKind::Starknet);
         assert_eq!(entry.rpc, "http://127.0.0.1:5050/rpc");
         assert_eq!(entry.chain_id, "0x534e5f5345504f4c4941");
         assert_eq!(entry.accounts.len(), 3);
@@ -607,7 +608,7 @@ mod tests {
         // The manifest advertises the baked seed-0 accounts...
         let manifest = Manifest::read(&manifest_path(net.base())).unwrap();
         let chain = &manifest.chains[0];
-        assert_eq!(chain.kind, "starknet");
+        assert_eq!(chain.kind, ChainKind::Starknet);
         let baked: HashSet<String> = chain.accounts.iter().map(|a| norm(&a.address)).collect();
 
         // ...which must still match what devnet actually predeploys. On RPC 0.10

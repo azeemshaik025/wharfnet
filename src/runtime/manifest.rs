@@ -7,6 +7,8 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+use crate::runtime::kind::ChainKind;
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Manifest {
     pub version: String,
@@ -17,7 +19,7 @@ pub struct Manifest {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ChainEntry {
     pub name: String,
-    pub kind: String,
+    pub kind: ChainKind,
     pub rpc: String,
     /// WebSocket RPC endpoint, when the chain serves one on a port *distinct*
     /// from its HTTP RPC. Solana (surfpool) serves WS on the HTTP port + 1, so
@@ -108,7 +110,7 @@ impl Manifest {
         let matches: Vec<&ChainEntry> = self
             .chains
             .iter()
-            .filter(|c| c.name == selector || c.kind == selector)
+            .filter(|c| c.name == selector || c.kind.as_str() == selector)
             .collect();
         if matches.is_empty() {
             let available = self
@@ -131,7 +133,7 @@ mod tests {
     fn sample() -> Manifest {
         Manifest::new(vec![ChainEntry {
             name: "anvil-1".into(),
-            kind: "evm".into(),
+            kind: ChainKind::Evm,
             rpc: "http://127.0.0.1:8545".into(),
             ws: None,
             chain_id: "31337".into(),

@@ -82,11 +82,12 @@ fn eth_balance_wei(chain: &ChainEntry, address: &str) -> Result<u128> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::kind::ChainKind;
 
     fn zksync_chain() -> ChainEntry {
         ChainEntry {
             name: "zksync-1".into(),
-            kind: "zksync".into(),
+            kind: ChainKind::Zksync,
             // Port 1 has nothing listening, so any path that actually reaches the
             // RPC fails at connect — deterministic even if a real localnet is up
             // on the default port. These tests only assert pre-RPC behaviour.

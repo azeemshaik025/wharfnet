@@ -172,12 +172,13 @@ fn find_token<'a>(chain: &'a ChainEntry, symbol: &str) -> Result<&'a Token> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::kind::ChainKind;
     use crate::runtime::manifest::Account;
 
     fn evm_chain() -> ChainEntry {
         ChainEntry {
             name: "anvil-1".into(),
-            kind: "evm".into(),
+            kind: ChainKind::Evm,
             rpc: "http://127.0.0.1:8545".into(),
             ws: None,
             chain_id: "31337".into(),

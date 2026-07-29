@@ -12,6 +12,15 @@ surface may still change.
 
 ### Added
 
+- **`ChainKind` in the library API** — the chain `kind` field is now a typed
+  `ChainKind` enum (`Evm`, `Starknet`, `Solana`, `Bitcoin`, `Litecoin`, `Zksync`)
+  rather than a bare string, re-exported at the crate root as `wharfnet::ChainKind`
+  and taken by the testkit (`net.of_kind(ChainKind::Evm)`). The on-disk
+  `wharfnet.toml`/manifest format is unchanged — `kind = "evm"` still parses — but
+  an unknown kind is now rejected at parse time (with the valid kinds listed), and
+  the exhaustive `match`es on it mean adding a chain kind is a compile error at
+  every dispatch site until it's handled.
+
 - **Boot a subset of chains** — `wharfnet up` and `wharfnet compose` now accept
   chain **selectors**: a kind (`evm`) or a name (`anvil-1`), repeatable, so
   `wharfnet up evm solana` boots only those chains and pulls only their images.

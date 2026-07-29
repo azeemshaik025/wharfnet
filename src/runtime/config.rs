@@ -16,13 +16,15 @@ use std::collections::HashSet;
 use std::fmt;
 use std::path::Path;
 
+use crate::runtime::kind::ChainKind;
+
 /// Config file looked up in the current working directory by default.
 pub const CONFIG_FILE: &str = "wharfnet.toml";
 /// Environment variable that overrides the config path (below an explicit flag).
 pub const CONFIG_ENV: &str = "WHARFNET_CONFIG";
 
-fn default_kind() -> String {
-    "evm".to_string()
+fn default_kind() -> ChainKind {
+    ChainKind::Evm
 }
 
 fn default_block_time() -> u64 {
@@ -71,10 +73,11 @@ pub struct Config {
 pub struct ChainConfig {
     /// Service / container name, e.g. "anvil-1".
     pub name: String,
-    /// Chain kind: "evm" (Anvil), "starknet" (starknet-devnet), or "solana"
-    /// (surfpool).
+    /// Chain kind: `evm` (Anvil), `starknet` (starknet-devnet), `solana`
+    /// (surfpool), `bitcoin`/`litecoin` (regtest), or `zksync` (anvil-zksync).
+    /// An unknown value is rejected at load with the supported set listed.
     #[serde(default = "default_kind")]
-    pub kind: String,
+    pub kind: ChainKind,
     /// Published host port for the RPC.
     pub port: u16,
     /// Chain identifier. Required and numeric for EVM chains (Anvil
@@ -106,7 +109,7 @@ impl Default for Config {
             chains: vec![
                 ChainConfig {
                     name: "anvil-1".to_string(),
-                    kind: "evm".to_string(),
+                    kind: ChainKind::Evm,
                     port: 8545,
                     chain_id: Some("31337".to_string()),
                     block_time: 1,
@@ -115,7 +118,7 @@ impl Default for Config {
                 },
                 ChainConfig {
                     name: "anvil-2".to_string(),
-                    kind: "evm".to_string(),
+                    kind: ChainKind::Evm,
                     port: 8546,
                     chain_id: Some("31338".to_string()),
                     block_time: 1,
@@ -124,7 +127,7 @@ impl Default for Config {
                 },
                 ChainConfig {
                     name: "starknet-1".to_string(),
-                    kind: "starknet".to_string(),
+                    kind: ChainKind::Starknet,
                     port: 5050,
                     // Starknet uses devnet's default chain id (SN_SEPOLIA).
                     chain_id: None,
@@ -134,7 +137,7 @@ impl Default for Config {
                 },
                 ChainConfig {
                     name: "solana-1".to_string(),
-                    kind: "solana".to_string(),
+                    kind: ChainKind::Solana,
                     port: 8899,
                     // Solana uses surfpool's local surfnet identity ("localnet").
                     chain_id: None,
@@ -144,7 +147,7 @@ impl Default for Config {
                 },
                 ChainConfig {
                     name: "bitcoin-1".to_string(),
-                    kind: "bitcoin".to_string(),
+                    kind: ChainKind::Bitcoin,
                     port: 18443,
                     // regtest has no numeric chain id (its network name identifies it).
                     chain_id: None,
@@ -154,7 +157,7 @@ impl Default for Config {
                 },
                 ChainConfig {
                     name: "litecoin-1".to_string(),
-                    kind: "litecoin".to_string(),
+                    kind: ChainKind::Litecoin,
                     port: 19443,
                     chain_id: None,
                     block_time: 1,
@@ -163,7 +166,7 @@ impl Default for Config {
                 },
                 ChainConfig {
                     name: "zksync-1".to_string(),
-                    kind: "zksync".to_string(),
+                    kind: ChainKind::Zksync,
                     port: 8011,
                     // zksync uses anvil-zksync's default chain id (260).
                     chain_id: None,
@@ -293,8 +296,8 @@ fn validate(config: &Config) -> Result<()> {
                 );
             }
         }
-        match c.kind.as_str() {
-            "evm" => {
+        match c.kind {
+            ChainKind::Evm => {
                 // Anvil needs a numeric chain id, so require one and check it parses.
                 let id = c.chain_id.as_deref().ok_or_else(|| {
                     anyhow::anyhow!("chain '{}': evm chains require a numeric chain_id", c.name)
@@ -306,13 +309,13 @@ fn validate(config: &Config) -> Result<()> {
                     )
                 })?;
             }
-            "starknet" => {
+            ChainKind::Starknet => {
                 // Starknet chains use devnet's default chain id (SN_SEPOLIA); a
                 // custom one isn't wired up yet. Forking IS supported via devnet's
                 // `--fork-network` (the shared `fork_url`/`fork_block` fields, with
                 // the generic `fork_block needs a fork_url` check below).
             }
-            "solana" => {
+            ChainKind::Solana => {
                 // Solana chains run surfpool's local surfnet, identified as
                 // "localnet", so no chain_id is required (like Starknet). Forking
                 // is supported via surfpool's `--rpc-url` (the shared `fork_url`
@@ -325,7 +328,7 @@ fn validate(config: &Config) -> Result<()> {
                     );
                 }
             }
-            "bitcoin" | "litecoin" => {
+            ChainKind::Bitcoin | ChainKind::Litecoin => {
                 // UTXO chains run bitcoind/litecoind in regtest — no numeric
                 // chain_id (like Starknet/Solana). Regtest is a standalone chain,
                 // not a copy-on-read fork of a live network, so forking is refused.
@@ -337,7 +340,7 @@ fn validate(config: &Config) -> Result<()> {
                     );
                 }
             }
-            "zksync" => {
+            ChainKind::Zksync => {
                 // anvil-zksync uses its own default chain id (260) when none is
                 // given, so a chain_id is optional (like Starknet/Solana); if one
                 // is set it must be numeric, mirroring the EVM check. Forking is
@@ -353,10 +356,6 @@ fn validate(config: &Config) -> Result<()> {
                     })?;
                 }
             }
-            other => bail!(
-                "chain '{}': kind '{other}' is not supported yet (supported: evm, starknet, solana, bitcoin, litecoin, zksync)",
-                c.name
-            ),
         }
         if !names.insert(c.name.as_str()) {
             bail!("duplicate chain name '{}'", c.name);
@@ -399,27 +398,27 @@ mod tests {
         assert_eq!(c.chains[1].chain_id.as_deref(), Some("31338"));
         // The Starknet chain is on by default; it carries no chain_id.
         assert_eq!(c.chains[2].name, "starknet-1");
-        assert_eq!(c.chains[2].kind, "starknet");
+        assert_eq!(c.chains[2].kind, ChainKind::Starknet);
         assert_eq!(c.chains[2].port, 5050);
         assert!(c.chains[2].chain_id.is_none());
         // The Solana chain is on by default too; it also carries no chain_id.
         assert_eq!(c.chains[3].name, "solana-1");
-        assert_eq!(c.chains[3].kind, "solana");
+        assert_eq!(c.chains[3].kind, ChainKind::Solana);
         assert_eq!(c.chains[3].port, 8899);
         assert!(c.chains[3].chain_id.is_none());
         // The Bitcoin and Litecoin regtest chains are on by default; no chain_id.
         assert_eq!(c.chains[4].name, "bitcoin-1");
-        assert_eq!(c.chains[4].kind, "bitcoin");
+        assert_eq!(c.chains[4].kind, ChainKind::Bitcoin);
         assert_eq!(c.chains[4].port, 18443);
         assert!(c.chains[4].chain_id.is_none());
         assert_eq!(c.chains[5].name, "litecoin-1");
-        assert_eq!(c.chains[5].kind, "litecoin");
+        assert_eq!(c.chains[5].kind, ChainKind::Litecoin);
         assert_eq!(c.chains[5].port, 19443);
         assert!(c.chains[5].chain_id.is_none());
         // The zkSync chain is on by default too; it uses anvil-zksync's default
         // chain id, so it carries none here.
         assert_eq!(c.chains[6].name, "zksync-1");
-        assert_eq!(c.chains[6].kind, "zksync");
+        assert_eq!(c.chains[6].kind, ChainKind::Zksync);
         assert_eq!(c.chains[6].port, 8011);
         assert!(c.chains[6].chain_id.is_none());
     }
@@ -475,7 +474,7 @@ mod tests {
         // an integer chain_id in TOML is stored as a string.
         assert_eq!(c.chains[0].chain_id.as_deref(), Some("1337"));
         // kind + block_time defaulted.
-        assert_eq!(c.chains[0].kind, "evm");
+        assert_eq!(c.chains[0].kind, ChainKind::Evm);
         assert_eq!(c.chains[0].block_time, 1);
     }
 
@@ -531,9 +530,9 @@ mod tests {
         );
         let c = load_from(&path).unwrap();
         assert_eq!(c.chains.len(), 2);
-        assert_eq!(c.chains[0].kind, "evm");
+        assert_eq!(c.chains[0].kind, ChainKind::Evm);
         assert_eq!(c.chains[0].chain_id.as_deref(), Some("31337"));
-        assert_eq!(c.chains[1].kind, "starknet");
+        assert_eq!(c.chains[1].kind, ChainKind::Starknet);
         // The Starknet chain omits chain_id; it must still default to None.
         assert!(c.chains[1].chain_id.is_none());
     }
@@ -641,8 +640,13 @@ mod tests {
             chain_id = 1
             "#,
         );
+        // `kind` is a `ChainKind`, so an unknown value is rejected while parsing,
+        // and serde names the supported variants in the message.
         let err = load_from(&path).unwrap_err();
-        assert!(err.to_string().contains("not supported yet"), "{err}");
+        let full = format!("{err:#}");
+        assert!(full.contains("unknown variant"), "{full}");
+        assert!(full.contains("aptos"), "{full}");
+        assert!(full.contains("evm") && full.contains("zksync"), "{full}");
     }
 
     #[test]
@@ -658,7 +662,7 @@ mod tests {
             "#,
         );
         let c = load_from(&path).unwrap();
-        assert_eq!(c.chains[0].kind, "solana");
+        assert_eq!(c.chains[0].kind, ChainKind::Solana);
         // Solana uses surfpool's local surfnet identity, so none is required.
         assert!(c.chains[0].chain_id.is_none());
     }
@@ -681,8 +685,8 @@ mod tests {
             "#,
         );
         let c = load_from(&path).unwrap();
-        assert_eq!(c.chains[0].kind, "bitcoin");
-        assert_eq!(c.chains[1].kind, "litecoin");
+        assert_eq!(c.chains[0].kind, ChainKind::Bitcoin);
+        assert_eq!(c.chains[1].kind, ChainKind::Litecoin);
         // regtest has no numeric chain id, so none is required.
         assert!(c.chains[0].chain_id.is_none());
         assert!(c.chains[1].chain_id.is_none());
@@ -764,7 +768,7 @@ mod tests {
             "#,
         );
         let c = load_from(&path).unwrap();
-        assert_eq!(c.chains[0].kind, "zksync");
+        assert_eq!(c.chains[0].kind, ChainKind::Zksync);
         assert!(c.chains[0].chain_id.is_none());
 
         // An explicit numeric chain_id is accepted and stored as a string.
@@ -828,7 +832,7 @@ mod tests {
             "#,
         );
         let c = load_from(&path).unwrap();
-        assert_eq!(c.chains[0].kind, "starknet");
+        assert_eq!(c.chains[0].kind, ChainKind::Starknet);
         // Starknet uses devnet's default chain id, so none is required.
         assert!(c.chains[0].chain_id.is_none());
     }
@@ -868,7 +872,7 @@ mod tests {
             "#,
         );
         let c = load_from(&path).unwrap();
-        assert_eq!(c.chains[0].kind, "starknet");
+        assert_eq!(c.chains[0].kind, ChainKind::Starknet);
         assert_eq!(
             c.chains[0].fork_url.as_deref(),
             Some("https://rpc.example/key")

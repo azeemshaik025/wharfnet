@@ -209,12 +209,13 @@ fn find_token<'a>(chain: &'a ChainEntry, symbol: &str) -> Result<&'a Token> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::kind::ChainKind;
     use crate::runtime::manifest::Account;
 
     fn solana_chain() -> ChainEntry {
         ChainEntry {
             name: "solana-1".into(),
-            kind: "solana".into(),
+            kind: ChainKind::Solana,
             rpc: "http://127.0.0.1:8899".into(),
             ws: Some("ws://127.0.0.1:8900".into()),
             chain_id: "localnet".into(),

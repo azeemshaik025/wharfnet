@@ -27,11 +27,11 @@ curl -s --user wharfnet:wharfnet -X POST http://127.0.0.1:19443 \
 
 <Callout type="info">
   Writing Rust tests? Read the endpoints and the funded account from a running
-  localnet with [`wharfnet::testkit`](/examples). UTXO chains have no per-kind
-  accessor, so select by name: `net.chain("litecoin-1")?.rpc_url()` (the URL
-  already embeds the dev creds) and `.account(0)` (the boot wallet address). There
-  are no test tokens, so `token`/`token_abi` don't apply — spend over RPC with any
-  Bitcoin-compatible client pointed at the Litecoin node.
+  localnet with [`wharfnet::testkit`](/examples): `net.litecoin().rpc_url()` (the
+  URL already embeds the dev creds) and `.account(0)` (the boot wallet address) —
+  or select by name with `net.chain("litecoin-1")?`. There are no test tokens, so
+  `token`/`token_abi` don't apply — spend over RPC with any Bitcoin-compatible
+  client pointed at the Litecoin node.
 </Callout>
 
 The RPC is served at `http://wharfnet:wharfnet@127.0.0.1:19443` — litecoind answers
