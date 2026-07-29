@@ -15,6 +15,7 @@ use serde_json::json;
 use std::path::Path;
 
 use super::{devnet, faucet};
+use crate::runtime::kind::ChainKind;
 use crate::runtime::manifest::{ChainEntry, Manifest};
 use crate::runtime::orchestrator::{DEFAULT_STATE_DIR, manifest_path};
 
@@ -33,7 +34,7 @@ where
     }
     let manifest = Manifest::read(&manifest_file)?;
     for chain in manifest.select(selector)? {
-        if chain.kind != "starknet" {
+        if chain.kind != ChainKind::Starknet {
             bail!(
                 "chain control under `wharfnet starknet` is only supported on Starknet chains (chain '{}' is an {} chain)",
                 chain.name,
@@ -166,7 +167,7 @@ mod tests {
     fn starknet_chain() -> ChainEntry {
         ChainEntry {
             name: "starknet-1".into(),
-            kind: "starknet".into(),
+            kind: ChainKind::Starknet,
             rpc: "http://127.0.0.1:5050/rpc".into(),
             ws: None,
             chain_id: "0x534e5f5345504f4c4941".into(),
@@ -219,7 +220,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let mut evm = starknet_chain();
         evm.name = "anvil-1".into();
-        evm.kind = "evm".into();
+        evm.kind = ChainKind::Evm;
         write_manifest(dir.path(), vec![evm]);
         let err = mine_in(dir.path(), "evm", 1).unwrap_err();
         assert!(

@@ -19,13 +19,15 @@ use serde_json::json;
 
 use super::rpc::{self, RPC_PASS, RPC_USER, WALLET};
 use crate::runtime::engine::{Engine, ExplorerTarget, HealthProbe, StateMode};
+use crate::runtime::kind::ChainKind;
 use crate::runtime::manifest::{Account, ChainEntry};
 
 /// Static parameters that distinguish the two otherwise-identical daemons.
 #[derive(Clone, Copy)]
 pub struct Coin {
-    /// Chain kind / manifest label: `"bitcoin"` or `"litecoin"`.
-    pub kind: &'static str,
+    /// Chain kind / manifest label: [`ChainKind::Bitcoin`] or
+    /// [`ChainKind::Litecoin`].
+    pub kind: ChainKind,
     /// Pinned daemon image (reproducible boots, like the other engines' images).
     pub image: &'static str,
     /// The RPC port inside the container (also the published host default). Set
@@ -43,7 +45,7 @@ pub struct Coin {
 /// Bitcoin Core in regtest. `bitcoin/bitcoin` is the official image; `:29` speaks
 /// Bitcoin Core 29 and the standard JSON-RPC.
 pub const BITCOIN: Coin = Coin {
-    kind: "bitcoin",
+    kind: ChainKind::Bitcoin,
     image: "bitcoin/bitcoin:29",
     rpc_port: 18443,
     symbol: "BTC",
@@ -53,7 +55,7 @@ pub const BITCOIN: Coin = Coin {
 /// Litecoin Core in regtest. `:0.21` is Litecoin Core v0.21.2.2 — a Bitcoin-0.21
 /// fork, so the RPC surface wharfnet uses is identical to Bitcoin's.
 pub const LITECOIN: Coin = Coin {
-    kind: "litecoin",
+    kind: ChainKind::Litecoin,
     image: "uphold/litecoin-core:0.21",
     rpc_port: 19443,
     symbol: "LTC",
@@ -141,7 +143,7 @@ impl Engine for UtxoEngine {
     fn manifest_entry(&self) -> ChainEntry {
         ChainEntry {
             name: self.name.clone(),
-            kind: self.coin.kind.to_string(),
+            kind: self.coin.kind,
             rpc: self.rpc_url(),
             ws: None,
             // regtest has no numeric chain id; the network name is the identifier.
@@ -173,7 +175,7 @@ impl Engine for UtxoEngine {
         // its RPC calls server-side, so it reaches the daemon over the docker
         // network via the chain's service name + internal RPC port.
         Some(ExplorerTarget::UtxoRpc {
-            coin: self.coin.kind,
+            coin: self.coin.kind.as_str(),
             chain_name: self.name.clone(),
             rpc_service: self.name.clone(),
             rpc_port: self.coin.rpc_port,
@@ -288,7 +290,7 @@ mod tests {
     #[test]
     fn manifest_entry_describes_a_regtest_chain() {
         let entry = UtxoEngine::new(LITECOIN, "litecoin-1", 19443).manifest_entry();
-        assert_eq!(entry.kind, "litecoin");
+        assert_eq!(entry.kind, ChainKind::Litecoin);
         assert_eq!(entry.chain_id, "regtest");
         // Credentials are embedded so a manifest reader can connect immediately.
         assert_eq!(entry.rpc, "http://wharfnet:wharfnet@127.0.0.1:19443");
@@ -316,7 +318,7 @@ mod tests {
                     rpc_port,
                     ..
                 }) => {
-                    assert_eq!(coin_kind, coin.kind);
+                    assert_eq!(coin_kind, coin.kind.as_str());
                     assert_eq!(chain_name, name);
                     assert_eq!(rpc_service, name);
                     assert_eq!(rpc_port, port);

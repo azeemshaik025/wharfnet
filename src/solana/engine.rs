@@ -9,6 +9,7 @@
 //! time — edit that template, not a Rust string.
 
 use crate::runtime::engine::{Engine, HealthProbe, StateMode};
+use crate::runtime::kind::ChainKind;
 use crate::runtime::manifest::{Account, ChainEntry};
 
 /// Pinned surfpool image. Pinned (like the Anvil and devnet images) so the boot
@@ -281,7 +282,7 @@ impl Engine for SolanaEngine {
         let forked = self.is_forked();
         ChainEntry {
             name: self.name.clone(),
-            kind: "solana".to_string(),
+            kind: ChainKind::Solana,
             rpc: format!("http://127.0.0.1:{}", self.host_port),
             // surfpool serves WS on its own port; advertise it (RPC port + 1) so
             // subscription clients don't have to guess. Always present.
@@ -395,7 +396,7 @@ mod tests {
     #[test]
     fn manifest_entry_describes_the_chain() {
         let entry = SolanaEngine::surfpool("solana-1", 8899).manifest_entry();
-        assert_eq!(entry.kind, "solana");
+        assert_eq!(entry.kind, ChainKind::Solana);
         assert_eq!(entry.rpc, "http://127.0.0.1:8899");
         // surfpool serves WS on the RPC port + 1.
         assert_eq!(entry.ws.as_deref(), Some("ws://127.0.0.1:8900"));
@@ -617,7 +618,7 @@ mod tests {
         // The manifest advertises the baked dev accounts...
         let manifest = Manifest::read(&manifest_path(net.base())).unwrap();
         let chain = &manifest.chains[0];
-        assert_eq!(chain.kind, "solana");
+        assert_eq!(chain.kind, ChainKind::Solana);
         assert_eq!(chain.accounts.len(), 3);
 
         // ...and each must be funded on-chain by the boot airdrop. getBalance

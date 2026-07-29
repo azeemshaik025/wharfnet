@@ -5,6 +5,7 @@
 //! strings.
 
 use crate::runtime::engine::{Engine, ExplorerTarget, HealthProbe, StagedFile, StateMode};
+use crate::runtime::kind::ChainKind;
 use crate::runtime::manifest::{Account, ChainEntry, Contract, Token};
 
 /// Internal port the engine listens on inside its container. The `INTERNAL_RPC`
@@ -232,7 +233,7 @@ impl Engine for EvmEngine {
         let forked = self.is_forked();
         ChainEntry {
             name: self.name.clone(),
-            kind: "evm".to_string(),
+            kind: ChainKind::Evm,
             rpc: format!("http://127.0.0.1:{}", self.host_port),
             // Anvil serves WS on the same port as HTTP, so it's derivable from
             // `rpc`; no distinct WS endpoint to advertise.
@@ -348,7 +349,7 @@ mod tests {
     #[test]
     fn manifest_entry_describes_the_chain() {
         let entry = EvmEngine::anvil("anvil-1", 8545, 31337).manifest_entry();
-        assert_eq!(entry.kind, "evm");
+        assert_eq!(entry.kind, ChainKind::Evm);
         assert_eq!(entry.rpc, "http://127.0.0.1:8545");
         assert_eq!(entry.chain_id, "31337");
         assert_eq!(entry.accounts.len(), 3);

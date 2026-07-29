@@ -8,6 +8,7 @@ use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::runtime::kind::ChainKind;
 use crate::runtime::manifest::{ChainEntry, Manifest};
 use crate::runtime::orchestrator::{compose_path, manifest_path};
 
@@ -89,7 +90,7 @@ impl Session {
 
 /// Ensure `chain` is an EVM chain — the only kind `cast`/`anvil` helpers support.
 pub fn ensure_evm(chain: &ChainEntry) -> Result<()> {
-    if chain.kind != "evm" {
+    if chain.kind != ChainKind::Evm {
         bail!(
             "'{}' is a {} chain; this command is only supported on EVM chains",
             chain.name,
@@ -119,7 +120,7 @@ mod tests {
     fn evm_chain() -> ChainEntry {
         ChainEntry {
             name: "anvil-1".into(),
-            kind: "evm".into(),
+            kind: ChainKind::Evm,
             rpc: "http://127.0.0.1:8545".into(),
             ws: None,
             chain_id: "31337".into(),
@@ -166,7 +167,7 @@ mod tests {
     #[test]
     fn ensure_evm_rejects_non_evm() {
         let mut solana = evm_chain();
-        solana.kind = "solana".into();
+        solana.kind = ChainKind::Solana;
         assert!(ensure_evm(&evm_chain()).is_ok());
         assert!(ensure_evm(&solana).is_err());
     }

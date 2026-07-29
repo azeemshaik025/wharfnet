@@ -11,6 +11,7 @@ use serde_json::json;
 use std::path::Path;
 
 use super::rpc::{self, WALLET};
+use crate::runtime::kind::ChainKind;
 use crate::runtime::manifest::{ChainEntry, Manifest};
 use crate::runtime::orchestrator::{DEFAULT_STATE_DIR, manifest_path};
 
@@ -27,7 +28,7 @@ where
     }
     let manifest = Manifest::read(&manifest_file)?;
     for chain in manifest.select(selector)? {
-        if chain.kind != "bitcoin" && chain.kind != "litecoin" {
+        if chain.kind != ChainKind::Bitcoin && chain.kind != ChainKind::Litecoin {
             bail!(
                 "chain control here is only supported on Bitcoin/Litecoin chains (chain '{}' is a {} chain)",
                 chain.name,
@@ -75,7 +76,7 @@ mod tests {
     fn utxo_chain() -> ChainEntry {
         ChainEntry {
             name: "bitcoin-1".into(),
-            kind: "bitcoin".into(),
+            kind: ChainKind::Bitcoin,
             rpc: "http://wharfnet:wharfnet@127.0.0.1:18443".into(),
             ws: None,
             chain_id: "regtest".into(),
@@ -115,7 +116,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let mut evm = utxo_chain();
         evm.name = "anvil-1".into();
-        evm.kind = "evm".into();
+        evm.kind = ChainKind::Evm;
         write_manifest(dir.path(), vec![evm]);
         let err = mine_in(dir.path(), "evm", 1).unwrap_err();
         assert!(

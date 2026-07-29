@@ -9,6 +9,8 @@
 //! Solana's test tokens are plain SPL mints on the native SPL Token program, so
 //! there's no custom program interface to ship — use `@solana/spl-token`.
 
+use crate::runtime::kind::ChainKind;
+
 /// EVM token ABIs (JSON), as emitted by `solc`.
 pub mod evm {
     /// Standard mintable ERC-20 — covers `USDC` and `WBTC`.
@@ -31,21 +33,21 @@ pub mod starknet {
     pub const REBASING_TOKEN: &str = include_str!("resources/abi/starknet/rebasing_token.json");
 }
 
-/// The ABI (JSON) for a bundled test token, keyed by chain `kind` (`"evm"` or
-/// `"starknet"`) and token `symbol`.
+/// The ABI (JSON) for a bundled test token, keyed by chain `kind`
+/// ([`ChainKind::Evm`] or [`ChainKind::Starknet`]) and token `symbol`.
 ///
 /// Returns `None` when the token's interface isn't shipped here: Solana SPL
 /// tokens (standard SPL Token program) and the Starknet `ETH`/`STRK` fee tokens
 /// (provided by devnet, not by wharfnet).
-pub fn token_abi(kind: &str, symbol: &str) -> Option<&'static str> {
+pub fn token_abi(kind: ChainKind, symbol: &str) -> Option<&'static str> {
     match (kind, symbol) {
-        ("evm", "USDC" | "WBTC") => Some(evm::TEST_TOKEN),
-        ("evm", "FEE") => Some(evm::FEE_TOKEN),
-        ("evm", "REB") => Some(evm::REBASING_TOKEN),
-        ("evm", "NRT") => Some(evm::NO_RETURN_TOKEN),
-        ("starknet", "USDC" | "WBTC") => Some(starknet::TEST_TOKEN),
-        ("starknet", "FEE") => Some(starknet::FEE_TOKEN),
-        ("starknet", "REB") => Some(starknet::REBASING_TOKEN),
+        (ChainKind::Evm, "USDC" | "WBTC") => Some(evm::TEST_TOKEN),
+        (ChainKind::Evm, "FEE") => Some(evm::FEE_TOKEN),
+        (ChainKind::Evm, "REB") => Some(evm::REBASING_TOKEN),
+        (ChainKind::Evm, "NRT") => Some(evm::NO_RETURN_TOKEN),
+        (ChainKind::Starknet, "USDC" | "WBTC") => Some(starknet::TEST_TOKEN),
+        (ChainKind::Starknet, "FEE") => Some(starknet::FEE_TOKEN),
+        (ChainKind::Starknet, "REB") => Some(starknet::REBASING_TOKEN),
         _ => None,
     }
 }
@@ -72,32 +74,45 @@ mod tests {
 
     #[test]
     fn maps_every_evm_token_to_its_shape() {
-        assert_eq!(token_abi("evm", "USDC"), Some(evm::TEST_TOKEN));
-        assert_eq!(token_abi("evm", "WBTC"), Some(evm::TEST_TOKEN));
-        assert_eq!(token_abi("evm", "FEE"), Some(evm::FEE_TOKEN));
-        assert_eq!(token_abi("evm", "REB"), Some(evm::REBASING_TOKEN));
-        assert_eq!(token_abi("evm", "NRT"), Some(evm::NO_RETURN_TOKEN));
+        assert_eq!(token_abi(ChainKind::Evm, "USDC"), Some(evm::TEST_TOKEN));
+        assert_eq!(token_abi(ChainKind::Evm, "WBTC"), Some(evm::TEST_TOKEN));
+        assert_eq!(token_abi(ChainKind::Evm, "FEE"), Some(evm::FEE_TOKEN));
+        assert_eq!(token_abi(ChainKind::Evm, "REB"), Some(evm::REBASING_TOKEN));
+        assert_eq!(token_abi(ChainKind::Evm, "NRT"), Some(evm::NO_RETURN_TOKEN));
     }
 
     #[test]
     fn maps_every_starknet_token_to_its_shape() {
-        assert_eq!(token_abi("starknet", "USDC"), Some(starknet::TEST_TOKEN));
-        assert_eq!(token_abi("starknet", "WBTC"), Some(starknet::TEST_TOKEN));
-        assert_eq!(token_abi("starknet", "FEE"), Some(starknet::FEE_TOKEN));
-        assert_eq!(token_abi("starknet", "REB"), Some(starknet::REBASING_TOKEN));
+        assert_eq!(
+            token_abi(ChainKind::Starknet, "USDC"),
+            Some(starknet::TEST_TOKEN)
+        );
+        assert_eq!(
+            token_abi(ChainKind::Starknet, "WBTC"),
+            Some(starknet::TEST_TOKEN)
+        );
+        assert_eq!(
+            token_abi(ChainKind::Starknet, "FEE"),
+            Some(starknet::FEE_TOKEN)
+        );
+        assert_eq!(
+            token_abi(ChainKind::Starknet, "REB"),
+            Some(starknet::REBASING_TOKEN)
+        );
     }
 
     #[test]
     fn declines_standard_and_unknown_interfaces() {
         // Solana SPL — standard program, nothing shipped.
-        assert!(token_abi("solana", "USDC").is_none());
-        assert!(token_abi("solana", "WBTC").is_none());
+        assert!(token_abi(ChainKind::Solana, "USDC").is_none());
+        assert!(token_abi(ChainKind::Solana, "WBTC").is_none());
         // Starknet fee tokens are provided by devnet, not wharfnet.
-        assert!(token_abi("starknet", "ETH").is_none());
-        assert!(token_abi("starknet", "STRK").is_none());
-        // Unknown kind / symbol.
-        assert!(token_abi("evm", "NOPE").is_none());
-        assert!(token_abi("aptos", "USDC").is_none());
+        assert!(token_abi(ChainKind::Starknet, "ETH").is_none());
+        assert!(token_abi(ChainKind::Starknet, "STRK").is_none());
+        // A known symbol on a kind that ships no ABIs, and an unknown symbol.
+        assert!(token_abi(ChainKind::Zksync, "USDC").is_none());
+        assert!(token_abi(ChainKind::Bitcoin, "USDC").is_none());
+        assert!(token_abi(ChainKind::Evm, "NOPE").is_none());
     }
 
     #[test]

@@ -261,6 +261,7 @@ fn find_token<'a>(chain: &'a ChainEntry, symbol: &str) -> Result<&'a Token> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::kind::ChainKind;
     use crate::runtime::manifest::Account;
     use std::io::{Read, Write};
     use std::net::TcpStream;
@@ -269,7 +270,7 @@ mod tests {
     fn starknet_chain() -> ChainEntry {
         ChainEntry {
             name: "starknet-1".into(),
-            kind: "starknet".into(),
+            kind: ChainKind::Starknet,
             rpc: "http://127.0.0.1:5050/rpc".into(),
             ws: None,
             chain_id: "0x534e5f5345504f4c4941".into(),

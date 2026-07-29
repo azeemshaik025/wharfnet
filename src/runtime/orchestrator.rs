@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 use super::config::{self, Config};
 use super::docker;
 use super::engine::{Engine, ExplorerTarget, HealthProbe, StateMode};
+use super::kind::ChainKind;
 use super::manifest::{ChainEntry, Manifest};
 use super::ui;
 use crate::evm::engine::EvmEngine;
@@ -105,8 +106,8 @@ fn engines_for(config: &Config, explorer: bool) -> Vec<Box<dyn Engine>> {
 }
 
 fn engine_for(c: &config::ChainConfig, explorer: bool) -> Box<dyn Engine> {
-    match c.kind.as_str() {
-        "evm" => {
+    match c.kind {
+        ChainKind::Evm => {
             let chain_id = c
                 .chain_id
                 .as_deref()
@@ -119,14 +120,14 @@ fn engine_for(c: &config::ChainConfig, explorer: bool) -> Box<dyn Engine> {
             }
             Box::new(engine)
         }
-        "starknet" => {
+        ChainKind::Starknet => {
             let mut engine = StarknetEngine::devnet(&c.name, c.port).ui(explorer);
             if let Some(url) = &c.fork_url {
                 engine = engine.fork(url.clone(), c.fork_block);
             }
             Box::new(engine)
         }
-        "solana" => {
+        ChainKind::Solana => {
             let mut engine = SolanaEngine::surfpool(&c.name, c.port).studio(explorer);
             if let Some(url) = &c.fork_url {
                 // surfpool takes no fork slot; config rejects fork_block on Solana.
@@ -137,9 +138,9 @@ fn engine_for(c: &config::ChainConfig, explorer: bool) -> Box<dyn Engine> {
         // Bitcoin and Litecoin are the same daemon family (Litecoin is a Bitcoin
         // fork with an identical RPC), so one engine serves both — only the coin
         // params differ. Regtest, no fork (config rejects fork_url for them).
-        "bitcoin" => Box::new(UtxoEngine::new(BITCOIN, &c.name, c.port)),
-        "litecoin" => Box::new(UtxoEngine::new(LITECOIN, &c.name, c.port)),
-        "zksync" => {
+        ChainKind::Bitcoin => Box::new(UtxoEngine::new(BITCOIN, &c.name, c.port)),
+        ChainKind::Litecoin => Box::new(UtxoEngine::new(LITECOIN, &c.name, c.port)),
+        ChainKind::Zksync => {
             // A chain_id is optional for zksync; fall back to anvil-zksync's own
             // default (260) when omitted. validate() guarantees any provided id is
             // numeric, so the parse can't realistically fail.
@@ -157,7 +158,6 @@ fn engine_for(c: &config::ChainConfig, explorer: bool) -> Box<dyn Engine> {
             }
             Box::new(engine)
         }
-        other => unreachable!("validate() rejects unsupported kind '{other}'"),
     }
 }
 
@@ -189,16 +189,23 @@ fn select_chains<'a>(
     };
     // Catch typos up front: every selector/exclude term must name a real chain.
     for term in selectors.iter().chain(exclude.iter()) {
-        if !chains.iter().any(|c| &c.name == term || &c.kind == term) {
+        if !chains
+            .iter()
+            .any(|c| &c.name == term || c.kind.as_str() == term.as_str())
+        {
             bail!("no chain matching '{term}'. Available: {}", available());
         }
     }
     let selected: Vec<&config::ChainConfig> = chains
         .iter()
         .filter(|c| {
-            let included =
-                selectors.is_empty() || selectors.iter().any(|s| &c.name == s || &c.kind == s);
-            let excluded = exclude.iter().any(|x| &c.name == x || &c.kind == x);
+            let included = selectors.is_empty()
+                || selectors
+                    .iter()
+                    .any(|s| &c.name == s || c.kind.as_str() == s.as_str());
+            let excluded = exclude
+                .iter()
+                .any(|x| &c.name == x || c.kind.as_str() == x.as_str());
             included && !excluded
         })
         .collect();
@@ -1035,7 +1042,7 @@ mod tests {
         let config = Config {
             chains: vec![config::ChainConfig {
                 name: "anvil-x".into(),
-                kind: "evm".into(),
+                kind: ChainKind::Evm,
                 port: EXPLORER_BASE_PORT,
                 chain_id: Some("31337".into()),
                 block_time: 1,
@@ -1123,7 +1130,7 @@ mod tests {
             chains: vec![
                 config::ChainConfig {
                     name: "solana-a".into(),
-                    kind: "solana".into(),
+                    kind: ChainKind::Solana,
                     port: 8899,
                     chain_id: None,
                     block_time: 1,
@@ -1132,7 +1139,7 @@ mod tests {
                 },
                 config::ChainConfig {
                     name: "evm-x".into(),
-                    kind: "evm".into(),
+                    kind: ChainKind::Evm,
                     port: 18899, // == solana-a's Studio port
                     chain_id: Some("31337".into()),
                     block_time: 1,
@@ -1335,7 +1342,7 @@ mod tests {
         let config = Config {
             chains: vec![config::ChainConfig {
                 name: "zksync-1".into(),
-                kind: "zksync".into(),
+                kind: ChainKind::Zksync,
                 port: 8011,
                 chain_id: None,
                 block_time: 1,
@@ -1347,7 +1354,7 @@ mod tests {
         assert_eq!(engines.len(), 1);
         assert_eq!(engines[0].name(), "zksync-1");
         let entry = engines[0].manifest_entry();
-        assert_eq!(entry.kind, "zksync");
+        assert_eq!(entry.kind, ChainKind::Zksync);
         // Falls back to anvil-zksync's default chain id.
         assert_eq!(entry.chain_id, "260");
 
@@ -1362,7 +1369,7 @@ mod tests {
         let config = Config {
             chains: vec![config::ChainConfig {
                 name: "zk-fork".into(),
-                kind: "zksync".into(),
+                kind: ChainKind::Zksync,
                 port: 8011,
                 chain_id: Some("300".into()),
                 block_time: 1,
@@ -1471,7 +1478,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let manifest = Manifest::new(vec![ChainEntry {
             name: "anvil-1".into(),
-            kind: "evm".into(),
+            kind: ChainKind::Evm,
             rpc: "http://127.0.0.1:8545".into(),
             ws: None,
             chain_id: "31337".into(),
@@ -1519,7 +1526,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let manifest = Manifest::new(vec![ChainEntry {
             name: "anvil-1".into(),
-            kind: "evm".into(),
+            kind: ChainKind::Evm,
             rpc: "http://127.0.0.1:8545".into(),
             ws: None,
             chain_id: "31337".into(),

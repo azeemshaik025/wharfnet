@@ -24,6 +24,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
+use crate::runtime::kind::ChainKind;
 use crate::runtime::manifest::{Account, ChainEntry, Manifest, Token};
 use crate::runtime::orchestrator::{DEFAULT_STATE_DIR, manifest_path};
 
@@ -72,9 +73,9 @@ impl Localnet {
             .with_context(|| format!("no chain named '{name}' in the running localnet"))
     }
 
-    /// The first chain of a kind (`"evm"`, `"solana"`, `"starknet"`), or an
-    /// error if none is running.
-    pub fn of_kind(&self, kind: &str) -> Result<Chain<'_>> {
+    /// The first chain of a kind ([`ChainKind::Evm`], [`ChainKind::Solana`], …),
+    /// or an error if none is running.
+    pub fn of_kind(&self, kind: ChainKind) -> Result<Chain<'_>> {
         self.manifest
             .chains
             .iter()
@@ -86,20 +87,20 @@ impl Localnet {
     /// The first EVM chain. Panics if none is running — convenient in tests
     /// where a missing chain is a setup error, not a case to handle.
     pub fn evm(&self) -> Chain<'_> {
-        self.expect_kind("evm")
+        self.expect_kind(ChainKind::Evm)
     }
 
     /// The first Solana chain. Panics if none is running.
     pub fn solana(&self) -> Chain<'_> {
-        self.expect_kind("solana")
+        self.expect_kind(ChainKind::Solana)
     }
 
     /// The first Starknet chain. Panics if none is running.
     pub fn starknet(&self) -> Chain<'_> {
-        self.expect_kind("starknet")
+        self.expect_kind(ChainKind::Starknet)
     }
 
-    fn expect_kind(&self, kind: &str) -> Chain<'_> {
+    fn expect_kind(&self, kind: ChainKind) -> Chain<'_> {
         self.of_kind(kind).unwrap_or_else(|e| panic!("{e}"))
     }
 }
@@ -125,9 +126,9 @@ impl<'a> Chain<'a> {
         &self.entry.name
     }
 
-    /// The chain kind (`"evm"`, `"solana"`, `"starknet"`).
-    pub fn kind(&self) -> &'a str {
-        &self.entry.kind
+    /// The chain kind ([`ChainKind::Evm`], [`ChainKind::Solana`], …).
+    pub fn kind(&self) -> ChainKind {
+        self.entry.kind
     }
 
     /// The HTTP JSON-RPC URL — point your client (viem, solana-client,
@@ -231,7 +232,7 @@ mod tests {
     fn write_sample(dir: &Path) {
         Manifest::new(vec![ChainEntry {
             name: "solana-1".into(),
-            kind: "solana".into(),
+            kind: ChainKind::Solana,
             rpc: "http://127.0.0.1:8899".into(),
             ws: Some("ws://127.0.0.1:8900".into()),
             chain_id: "localnet".into(),
@@ -251,7 +252,7 @@ mod tests {
         Manifest::new(vec![
             ChainEntry {
                 name: "anvil-1".into(),
-                kind: "evm".into(),
+                kind: ChainKind::Evm,
                 rpc: "http://127.0.0.1:8545".into(),
                 ws: None,
                 chain_id: "31337".into(),
@@ -266,7 +267,7 @@ mod tests {
             },
             ChainEntry {
                 name: "solana-1".into(),
-                kind: "solana".into(),
+                kind: ChainKind::Solana,
                 rpc: "http://127.0.0.1:8899".into(),
                 ws: Some("ws://127.0.0.1:8900".into()),
                 chain_id: "localnet".into(),
@@ -278,7 +279,7 @@ mod tests {
             },
             ChainEntry {
                 name: "starknet-1".into(),
-                kind: "starknet".into(),
+                kind: ChainKind::Starknet,
                 rpc: "http://127.0.0.1:5050/rpc".into(),
                 ws: None,
                 chain_id: "0x534e5f5345504f4c4941".into(),
@@ -301,7 +302,7 @@ mod tests {
         let net = Localnet::connect_from(dir.path()).unwrap();
         let sol = net.solana();
         assert_eq!(sol.name(), "solana-1");
-        assert_eq!(sol.kind(), "solana");
+        assert_eq!(sol.kind(), ChainKind::Solana);
         assert_eq!(sol.rpc_url(), "http://127.0.0.1:8899");
         assert_eq!(sol.ws_url(), Some("ws://127.0.0.1:8900"));
         assert_eq!(sol.chain_id(), "localnet");
@@ -363,8 +364,11 @@ mod tests {
         let names: Vec<&str> = net.chains().map(|c| c.name()).collect();
         assert_eq!(names, vec!["anvil-1", "solana-1", "starknet-1"]);
 
-        assert_eq!(net.chain("anvil-1").unwrap().kind(), "evm");
-        assert_eq!(net.of_kind("starknet").unwrap().name(), "starknet-1");
+        assert_eq!(net.chain("anvil-1").unwrap().kind(), ChainKind::Evm);
+        assert_eq!(
+            net.of_kind(ChainKind::Starknet).unwrap().name(),
+            "starknet-1"
+        );
     }
 
     #[test]
@@ -375,7 +379,7 @@ mod tests {
 
         let by_name = net.chain("anvil-1").unwrap_err();
         assert!(by_name.to_string().contains("anvil-1"), "{by_name}");
-        let by_kind = net.of_kind("evm").unwrap_err();
+        let by_kind = net.of_kind(ChainKind::Evm).unwrap_err();
         assert!(by_kind.to_string().contains("evm"), "{by_kind}");
     }
 

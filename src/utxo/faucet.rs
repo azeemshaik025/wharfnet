@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 
 use super::rpc::{self, WALLET};
 use crate::runtime::amount::to_base_units;
+use crate::runtime::kind::ChainKind;
 use crate::runtime::manifest::ChainEntry;
 use crate::runtime::ui;
 
@@ -22,7 +23,7 @@ const SATS_PER_COIN: u128 = 100_000_000;
 
 /// Native symbol for a UTXO `chain`, derived from its kind.
 fn symbol(chain: &ChainEntry) -> &'static str {
-    if chain.kind == "litecoin" {
+    if chain.kind == ChainKind::Litecoin {
         "LTC"
     } else {
         "BTC"
@@ -114,10 +115,10 @@ mod tests {
     use super::*;
     use crate::runtime::manifest::ChainEntry;
 
-    fn utxo_chain(kind: &str) -> ChainEntry {
+    fn utxo_chain(kind: ChainKind) -> ChainEntry {
         ChainEntry {
             name: format!("{kind}-1"),
-            kind: kind.to_string(),
+            kind,
             rpc: "http://wharfnet:wharfnet@127.0.0.1:18443".into(),
             ws: None,
             chain_id: "regtest".into(),
@@ -139,8 +140,8 @@ mod tests {
 
     #[test]
     fn symbol_tracks_the_kind() {
-        assert_eq!(symbol(&utxo_chain("bitcoin")), "BTC");
-        assert_eq!(symbol(&utxo_chain("litecoin")), "LTC");
+        assert_eq!(symbol(&utxo_chain(ChainKind::Bitcoin)), "BTC");
+        assert_eq!(symbol(&utxo_chain(ChainKind::Litecoin)), "LTC");
     }
 
     #[test]
@@ -155,8 +156,14 @@ mod tests {
 
     #[test]
     fn unknown_token_is_rejected_for_utxo() {
-        let err =
-            fund_chain(&utxo_chain("bitcoin"), "abc123", "1", Some("USDC"), false).unwrap_err();
+        let err = fund_chain(
+            &utxo_chain(ChainKind::Bitcoin),
+            "abc123",
+            "1",
+            Some("USDC"),
+            false,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("only the native BTC"), "{err}");
     }
 }

@@ -136,6 +136,7 @@ pub(crate) fn call(chain: &ChainEntry, method: &str, params: Value) -> Result<Va
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::kind::ChainKind;
     use std::net::TcpListener;
     use std::thread;
 
@@ -167,7 +168,7 @@ mod tests {
     fn chain_on(port: u16) -> ChainEntry {
         ChainEntry {
             name: "zksync-1".into(),
-            kind: "zksync".into(),
+            kind: ChainKind::Zksync,
             rpc: format!("http://127.0.0.1:{port}"),
             ws: None,
             chain_id: "260".into(),
