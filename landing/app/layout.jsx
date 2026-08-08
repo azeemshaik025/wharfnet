@@ -5,9 +5,22 @@ import { Logo } from './logo'
 import 'nextra-theme-docs/style.css'
 import './globals.css'
 
+// The site is served under /wharfnet on GitHub Pages (see next.config.mjs).
+// Metadata image URLs resolve against metadataBase (which has no path), so the
+// basePath is included explicitly here. Served as a real PNG from public/, so
+// link-preview crawlers get `Content-Type: image/png` (an extensionless route
+// would be served as application/octet-stream and some crawlers reject it).
+const basePath = process.env.NODE_ENV === 'production' ? '/wharfnet' : ''
+const ogImage = {
+  url: `${basePath}/og.png`,
+  width: 1200,
+  height: 630,
+  alt: 'Wharfnet — one-command localnet for EVM, Solana, Starknet, Bitcoin, Litecoin & zkSync'
+}
+
 export const metadata = {
-  // Origin used to resolve the generated OG image to an absolute URL (basePath
-  // is appended automatically). Update this if a custom domain is configured.
+  // Origin used to resolve relative metadata URLs to absolute ones. Update this
+  // (and basePath above) if a custom domain is configured.
   metadataBase: new URL('https://sainathr19.github.io'),
   title: {
     default: 'Wharfnet',
@@ -21,13 +34,15 @@ export const metadata = {
       'One-command localnet for EVM, Solana, Starknet, Bitcoin, Litecoin & zkSync — built-in faucet, pre-deployed test tokens and more.',
     url: '/wharfnet',
     siteName: 'Wharfnet',
-    type: 'website'
+    type: 'website',
+    images: [ogImage]
   },
   twitter: {
     card: 'summary_large_image',
     title: 'Wharfnet',
     description:
-      'One-command localnet for EVM, Solana, Starknet, Bitcoin, Litecoin & zkSync.'
+      'One-command localnet for EVM, Solana, Starknet, Bitcoin, Litecoin & zkSync.',
+    images: [ogImage.url]
   }
 }
 
