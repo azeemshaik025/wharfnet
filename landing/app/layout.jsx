@@ -14,11 +14,11 @@ export const metadata = {
     template: '%s | Wharfnet'
   },
   description:
-    'One-command localnet for EVM, Solana & Starknet — built-in faucet, pre-deployed test tokens and more.',
+    'One-command localnet for EVM, Solana, Starknet, Bitcoin, Litecoin & zkSync — built-in faucet, pre-deployed test tokens and more.',
   openGraph: {
     title: 'Wharfnet',
     description:
-      'One-command localnet for EVM, Solana & Starknet — built-in faucet, pre-deployed test tokens and more.',
+      'One-command localnet for EVM, Solana, Starknet, Bitcoin, Litecoin & zkSync — built-in faucet, pre-deployed test tokens and more.',
     url: '/wharfnet',
     siteName: 'Wharfnet',
     type: 'website'
@@ -26,7 +26,8 @@ export const metadata = {
   twitter: {
     card: 'summary_large_image',
     title: 'Wharfnet',
-    description: 'One-command localnet for EVM, Solana & Starknet.'
+    description:
+      'One-command localnet for EVM, Solana, Starknet, Bitcoin, Litecoin & zkSync.'
   }
 }
 

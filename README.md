@@ -6,11 +6,12 @@
 
 **One-command localnet for EVM, Solana, Starknet, Bitcoin, Litecoin & zkSync — built-in faucet, pre-deployed test tokens and more.**
 
-> ⚠️ Early WIP. Six chains — EVM (Anvil), Starknet (starknet-devnet), Solana
-> (surfpool), Bitcoin + Litecoin (regtest), and zkSync (anvil-zksync) — boot by
-> default with funded accounts, a faucet, chain control, and persistence, plus
-> test tokens, forking, and a built-in block explorer where the chain supports
-> them. The CLI surface may still change. See the [CHANGELOG](./CHANGELOG.md).
+> 🚧 Actively developed, pre-1.0. Six chains — EVM (Anvil), Starknet
+> (starknet-devnet), Solana (surfpool), Bitcoin + Litecoin (regtest), and zkSync
+> (anvil-zksync) — boot by default with funded accounts, a faucet, chain control,
+> and persistence, plus test tokens, forking, and a built-in block explorer where
+> the chain supports them. APIs may still change before 1.0. See the
+> [CHANGELOG](./CHANGELOG.md).
 
 `wharfnet` is the local harbor for your chains: boot EVM, Solana, Starknet,
 Bitcoin/Litecoin, and zkSync networks locally with a single command, fund
@@ -142,7 +143,7 @@ addresses, all read from the manifest `wharfnet up` writes:
 ```toml
 # Cargo.toml
 [dev-dependencies]
-wharfnet = "0.1.0-alpha.1"   # pre-release: pin the exact version
+wharfnet = "0.1.0"   # pre-1.0 — pin the version you tested against
 ```
 
 ```rust
@@ -221,8 +222,8 @@ credentials (`wharfnet:wharfnet`), and at boot each mines a spendable balance in
 a `wharfnet` wallet. Fund any address with `wharfnet faucet bitcoin-1 <addr>
 <amount>` (native coin only — UTXO chains carry no test tokens), and mine blocks
 on demand with `wharfnet bitcoin mine <n>` / `wharfnet litecoin mine <n>`. They
-don't fork (`fork_url` is rejected) and run fresh every boot (`--resume`/`--reset`
-don't apply).
+don't fork (`fork_url` is rejected), but they do persist like the other chains:
+`--resume` keeps the regtest datadir across `down` → `up`, and `--reset` wipes it.
 
 By default wharfnet reads `./wharfnet.toml`. Point at a different file with
 `--config <path>` (or `-c`) on `up`/`compose`, or the `WHARFNET_CONFIG` env var:

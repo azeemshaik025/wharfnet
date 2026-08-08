@@ -1,4 +1,4 @@
-//! wharfnet — one-command localnet for EVM, Solana & Starknet.
+//! wharfnet — one-command localnet for EVM, Solana, Starknet, Bitcoin, Litecoin & zkSync.
 //!
 //! This crate is both the `wharfnet` CLI and a library. The library exposes a
 //! small **test-utils** API ([`testkit`]) so integration tests can connect to a

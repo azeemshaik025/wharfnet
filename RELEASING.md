@@ -10,7 +10,7 @@ crates.io, and cuts a GitHub Release.
 Versioning follows [SemVer](https://semver.org). All work lands on `main` through
 a PR first (see the branch rules below), then the release is tagged on `main`.
 
-1. **Bump the version** — on a branch off `dev`, edit `version` in `Cargo.toml`
+1. **Bump the version** — on a feature branch off `main`, edit `version` in `Cargo.toml`
    and move the `## [Unreleased]` section of `CHANGELOG.md` under a new
    `## [X.Y.Z]` heading.
 2. **PR it into `main`** and merge once CI is green.
@@ -77,5 +77,5 @@ cargo publish --locked
 ## Branch rules
 
 `main` is protected: no direct commits, PRs only, and `rustfmt` / `clippy` /
-`cargo test` must pass. Do work on `dev`, PR to `main`, and merge — see the
-project's git workflow.
+`cargo test` must pass. Do work on a feature branch, PR to `main`, and merge —
+see the project's git workflow.

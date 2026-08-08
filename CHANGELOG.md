@@ -5,10 +5,12 @@ All notable changes to **wharfnet** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-wharfnet is early WIP — published as a pre-release, so the CLI and library
-surface may still change.
+wharfnet is pre-1.0 and actively developed, so the CLI and library surface may
+still change between releases.
 
 ## [Unreleased]
+
+## [0.1.0] - 2026-08-08
 
 ### Added
 
@@ -280,7 +282,8 @@ surface may still change.
   covers boot, funded dev accounts, chain control, SPL test tokens, the faucet,
   forking, and persistence; weird Token-2022 tokens are the main piece left.
 
-[Unreleased]: https://github.com/sainathr19/wharfnet/compare/v0.1.0-alpha.1...HEAD
+[Unreleased]: https://github.com/sainathr19/wharfnet/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/sainathr19/wharfnet/compare/v0.1.0-alpha.1...v0.1.0
 [0.1.0-alpha.1]: https://github.com/sainathr19/wharfnet/releases/tag/v0.1.0-alpha.1
 [btc-rpc-explorer]: https://github.com/janoside/btc-rpc-explorer
 [ltc-rpc-explorer]: https://hub.docker.com/r/techtoshi/ltc-rpc-explorer
