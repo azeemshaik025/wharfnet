@@ -11,7 +11,7 @@ export function BootDemo() {
       </div>
       <pre className="term-body">
         <span className="t-dim">$ </span>wharfnet up{'\n'}
-        <span className="t-accent">⚓</span> booting 7 chains + block explorers…{'\n'}
+        <span className="t-accent">⚓</span> booting your chains + block explorers…{'\n'}
         {'  '}
         <span className="t-ok">✔</span> anvil-1{'     '}
         <span className="t-url">http://127.0.0.1:8545</span>

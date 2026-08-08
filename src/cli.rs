@@ -13,7 +13,7 @@ use crate::zksync::control as zksync_control;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-/// One-command localnet for EVM, Solana & Starknet.
+/// One-command localnet for EVM, Solana, Starknet, Bitcoin, Litecoin & zkSync.
 #[derive(Parser)]
 #[command(name = "wharfnet", version, about, long_about = None)]
 struct Cli {

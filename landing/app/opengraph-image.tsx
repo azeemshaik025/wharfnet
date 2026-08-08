@@ -2,7 +2,8 @@ import { ImageResponse } from 'next/og'
 
 // Social preview card for link unfurls (og:image / twitter:image). Generated as
 // a static PNG at build time.
-export const alt = 'Wharfnet — one-command localnet for EVM, Solana & Starknet'
+export const alt =
+  'Wharfnet — one-command localnet for EVM, Solana, Starknet, Bitcoin, Litecoin & zkSync'
 export const size = { width: 1200, height: 630 }
 export const contentType = 'image/png'
 // Required for `output: export` — generate the image once at build time.
@@ -36,16 +37,16 @@ export default function OpengraphImage() {
           <span style={{ fontSize: 64, fontWeight: 800, letterSpacing: '-0.02em' }}>Wharfnet</span>
         </div>
 
-        <div style={{ marginTop: 32, fontSize: 40, fontWeight: 600, lineHeight: 1.25, maxWidth: 940 }}>
-          One-command localnet for EVM, Solana &amp; Starknet
+        <div style={{ marginTop: 32, fontSize: 40, fontWeight: 600, lineHeight: 1.25, maxWidth: 1000 }}>
+          One-command localnet for EVM, Solana, Starknet, Bitcoin, Litecoin &amp; zkSync
         </div>
 
         <div style={{ marginTop: 20, fontSize: 26, color: '#9aa0aa', maxWidth: 900 }}>
           Built-in faucet, pre-deployed test tokens, forking, and a block explorer per chain.
         </div>
 
-        <div style={{ display: 'flex', gap: 16, marginTop: 48 }}>
-          {['EVM', 'Solana', 'Starknet'].map((c) => (
+        <div style={{ display: 'flex', gap: 16, marginTop: 48, flexWrap: 'wrap' }}>
+          {['EVM', 'Solana', 'Starknet', 'Bitcoin', 'Litecoin', 'zkSync'].map((c) => (
             <div
               key={c}
               style={{
